@@ -3,6 +3,11 @@ import pandas as pd
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 
+streamlit
+pandas
+scikit-learn
+numpy
+
 # =======================
 # Sample Datasets
 # =======================
@@ -68,3 +73,4 @@ if st.button("Find Opportunities"):
         st.dataframe(course_recs[["Course", "Match %"]].reset_index(drop=True), use_container_width=True)
     else:
         st.warning("Please enter at least one skill.")
+
