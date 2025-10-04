@@ -16,6 +16,11 @@ jobs = pd.DataFrame({
     ]
 })
 
+headers = {
+    "X-RapidAPI-Key": st.secrets["RAPIDAPI_KEY"],
+    "X-RapidAPI-Host": "jsearch.p.rapidapi.com"
+}
+
 courses = pd.DataFrame({
     "Course": ["Intro to Python Programming", "Machine Learning with TensorFlow", 
                "Web Development Bootcamp", "Cybersecurity Fundamentals"],
@@ -53,7 +58,7 @@ st.set_page_config(page_title="AI Job & Course Finder", page_icon="💼", layout
 
 st.title("💼 AI Job & Course Finder")
 st.write("Enter your skills and get personalized job & course recommendations!")
-
+st.write("Your API key is:", st.secrets["RAPIDAPI_KEY"])
 user_input = st.text_input("Enter your skills (comma separated):", "Python, SQL")
 
 if st.button("Find Opportunities"):
