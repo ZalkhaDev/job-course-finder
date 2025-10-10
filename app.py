@@ -517,6 +517,10 @@ if st.session_state.game_over:
 
 # Active Game
 elif not st.session_state.game_over:
+    # Ensure current_question exists
+    if not hasattr(st.session_state, 'current_question') or st.session_state.current_question is None:
+        setup_new_question()
+    
     if st.session_state.feedback:
         feedback_type, feedback_msg = st.session_state.feedback
         if feedback_type == "correct":
