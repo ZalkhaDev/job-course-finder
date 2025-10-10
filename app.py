@@ -45,68 +45,60 @@ class PlayerProfiler:
         return sum(self.recent_performance) / len(self.recent_performance)
 
 class MinimaxAI:
-    """AI Question Master using a two-ply adversarial selection"""
+    """AI Question Master using Minimax with Alpha-Beta Pruning"""
     def __init__(self, questions: List[Question], profiler: PlayerProfiler):
         self.questions = questions
         self.profiler = profiler
-        self.max_depth = 2  # currently using two-ply (AI -> Player)
+        self.max_depth = 2
         
-    def evaluate_state(self, level: int, lives: int) -> float:
-        """
-        Heuristic evaluation function returning a utility for the AI (higher = better for AI).
-        The AI prefers questions that reduce player's chance to progress.
-        """
-        progress_ratio = level / TOTAL_LEVELS
+    def evaluate_state(self, level: int, lives: int, question: Question) -> float:
+        """Heuristic evaluation function"""
+        success_prob = self.profiler.get_success_probability(question.difficulty)
+        
+        # AI wants to challenge player (minimize player's expected score)
+        difficulty_factor = question.difficulty / 3.0
+        progress_penalty = level / TOTAL_LEVELS
         lives_factor = lives / MAX_LIVES
         
-        # Utility components:
-        # - Less player progress is better for AI -> contribute positively when progress low
-        # - Fewer lives is better for AI
-        ai_score = (1.0 - progress_ratio) * 20 + ( (MAX_LIVES - lives) * 5 )
-        return ai_score
+        # Lower score is better for AI (harder for player)
+        score = -(success_prob * 10) + (difficulty_factor * 5) - (progress_penalty * 3)
+        
+        return score
     
-    def evaluate_question_for_ai(self, level: int, lives: int, question: Question) -> float:
-        """
-        Evaluate the AI utility for a specific question by estimating the player's response.
-        We compute the *worst-case* (for AI) player choice (i.e., the player will choose the option
-        that gives the lowest AI utility). Then AI selects question that maximizes that worst-case.
-        """
-        # estimate probability of player answering correctly for that difficulty
-        success_prob = self.profiler.get_success_probability(question.difficulty)
-        # For each possible choice, simulate outcome (correct or wrong). Player will pick the best choice for them
-        # (i.e., the choice that results in the lowest AI utility). So AI assumes player acts optimally.
-        # We don't need to iterate actual textual options because correctness is binary.
-        # But to keep logic close to reality we'll consider two branches: correct or incorrect.
+    def minimax(self, level: int, lives: int, depth: int, alpha: float, beta: float, 
+                maximizing_player: bool, available_questions: List[Question]) -> Tuple[float, Optional[Question]]:
+        """Minimax with Alpha-Beta Pruning"""
+        if depth == 0 or not available_questions:
+            return 0, None
         
-        # Branch: player picks correct answer (probability = success_prob)
-        level_if_correct = min(TOTAL_LEVELS, level + 1)
-        lives_if_correct = lives
-        util_if_correct = self.evaluate_state(level_if_correct, lives_if_correct)
+        if maximizing_player:  # AI's turn (actually minimizing player success)
+            max_eval = float('-inf')
+            best_question = None
+            
+            for question in available_questions:
+                eval_score = self.evaluate_state(level, lives, question)
+                
+                if eval_score > max_eval:
+                    max_eval = eval_score
+                    best_question = question
+                
+                alpha = max(alpha, eval_score)
+                if beta <= alpha:
+                    break  # Alpha-Beta pruning
+            
+            return max_eval, best_question
         
-        # Branch: player picks wrong answer (probability = 1 - success_prob)
-        level_if_wrong = level
-        lives_if_wrong = max(0, lives - 1)
-        util_if_wrong = self.evaluate_state(level_if_wrong, lives_if_wrong)
-        
-        # From AI perspective, the player will choose action that minimizes AI utility.
-        # But in expectation, the player's actual response is probabilistic; for adversarial (worst-case)
-        # assume player picks whatever gives the minimum utility to AI.
-        worst_case_util = min(util_if_correct, util_if_wrong)
-        
-        # To combine both the difficulty and the worst-case util, add a difficulty bonus
-        difficulty_bonus = (question.difficulty - 1) * 3  # higher difficulty slightly increases AI utility
-        return worst_case_util + difficulty_bonus
-    
     def select_question(self, level: int, lives: int, used_questions: set) -> Question:
-        """Select the best question using two-ply adversarial reasoning"""
+        """Select the best question using Minimax"""
         available = [q for q in self.questions if id(q) not in used_questions]
         
         if not available:
             return random.choice(self.questions)
         
-        # Adjust available questions based on player skill (simple filtering)
+        # Adjust available questions based on player skill
         skill = self.profiler.get_overall_skill()
         
+        # Filter questions by appropriate difficulty
         if skill < 0.4:
             preferred = [q for q in available if q.difficulty <= 2]
         elif skill > 0.7:
@@ -117,20 +109,10 @@ class MinimaxAI:
         if not preferred:
             preferred = available
         
-        # If list is large, sample to limit runtime (Minimax depth is small but keep responsive)
-        candidate_list = preferred[:16]  # take up to 16 candidates to evaluate
+        _, best_question = self.minimax(level, lives, self.max_depth, float('-inf'), 
+                                       float('inf'), True, preferred[:8])
         
-        best_q = None
-        best_score = float('-inf')
-        
-        for q in candidate_list:
-            score = self.evaluate_question_for_ai(level, lives, q)
-            # choose question that maximizes AI's worst-case utility
-            if score > best_score:
-                best_score = score
-                best_q = q
-        
-        return best_q if best_q else random.choice(preferred)
+        return best_question if best_question else random.choice(preferred)
 
 def load_questions() -> List[Question]:
     """Load vocabulary questions"""
@@ -193,14 +175,8 @@ def setup_new_question():
     st.session_state.used_questions.add(id(question))
     st.session_state.current_question = question
     
-    # Create answer options (ensure NUM_OPTIONS if possible)
+    # Create answer options
     options = [question.meaning] + question.distractors
-    # If fewer distractors than needed, fill with other meanings
-    if len(options) < NUM_OPTIONS:
-        extras = [q.meaning for q in st.session_state.questions if q.meaning not in options]
-        random.shuffle(extras)
-        while len(options) < NUM_OPTIONS and extras:
-            options.append(extras.pop())
     random.shuffle(options)
     st.session_state.options = options
 
@@ -236,44 +212,46 @@ if 'level' not in st.session_state:
 # Custom CSS
 st.markdown("""
 <style>
-/* --- Feedback Animations --- */
-.correct-feedback {
-    background: linear-gradient(135deg, #a8e063, #56ab2f);
-    color: white;
-    border-radius: 15px;
-    padding: 15px;
-    text-align: center;
-    font-size: 20px;
-    font-weight: bold;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
-    animation: pulseCorrect 0.5s ease;
-}
-.wrong-feedback {
-    background: linear-gradient(135deg, #ff5858, #f09819);
-    color: white;
-    border-radius: 15px;
-    padding: 15px;
-    text-align: center;
-    font-size: 20px;
-    font-weight: bold;
-    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
-    animation: shakeWrong 0.5s ease;
-}
-@keyframes pulseCorrect {
-    0% { transform: scale(1); }
-    50% { transform: scale(1.05); }
-    100% { transform: scale(1); }
-}
-@keyframes shakeWrong {
-    0% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    50% { transform: translateX(5px); }
-    75% { transform: translateX(-5px); }
-    100% { transform: translateX(0); }
-}
+    .main {
+        background: linear-gradient(to bottom, #87CEEB 0%, #52A4D9 100%);
+    }
+    .stButton button {
+        width: 100%;
+        height: 100px;
+        font-size: 18px;
+        border-radius: 15px;
+        border: 3px solid #1e7d5e;
+        background-color: #2ecc71;
+        color: white;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .stButton button:hover {
+        background-color: #27ae60;
+        transform: scale(1.05);
+    }
+    .stat-box {
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+    }
+    .question-box {
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 30px;
+        border-radius: 15px;
+        text-align: center;
+        margin: 20px 0;
+    }
+    .question-text {
+        color: white;
+        font-size: 32px;
+        font-weight: bold;
+    }
 </style>
 """, unsafe_allow_html=True)
-
 
 # Title
 st.markdown("<h1 style='text-align: center; color: white;'>🐸 Frog & Treasure Island 🏝️</h1>", unsafe_allow_html=True)
@@ -318,9 +296,9 @@ elif not st.session_state.game_over:
     if st.session_state.feedback:
         feedback_type, feedback_msg = st.session_state.feedback
         if feedback_type == "correct":
-            st.markdown(f"<div class='correct-feedback'>{feedback_msg}</div>", unsafe_allow_html=True)
+            st.success(feedback_msg)
         else:
-            st.markdown(f"<div class='wrong-feedback'>{feedback_msg}</div>", unsafe_allow_html=True)
+            st.error(feedback_msg)
         
         col1, col2, col3 = st.columns([1, 1, 1])
         with col2:
@@ -329,7 +307,6 @@ elif not st.session_state.game_over:
                 if not st.session_state.game_over:
                     setup_new_question()
                 st.rerun()
-
     
     else:
         # Display question
@@ -353,9 +330,10 @@ elif not st.session_state.game_over:
         st.markdown("<h4 style='text-align: center; color: white;'>🪷 Jump to the correct lily pad! 🪷</h4>", unsafe_allow_html=True)
         
         # Answer options (lily pads)
-        cols = st.columns(2)
+        col1, col2 = st.columns(2)
+        
         for idx, option in enumerate(st.session_state.options):
-            with cols[idx % 2]:
+            with col1 if idx % 2 == 0 else col2:
                 if st.button(f"🪷 {option}", key=f"option_{idx}"):
                     handle_answer(option)
                     st.rerun()
@@ -378,13 +356,11 @@ with st.sidebar:
     - Hard (⭐⭐⭐): 30 points
     
     **AI Features:**
-    - Two-ply adversarial reasoning (AI chooses question, assumes player chooses best answer)
+    - Uses Minimax algorithm
+    - Alpha-Beta pruning optimization
     - Dynamic difficulty adjustment
     - Player performance profiling
     """)
     
     st.markdown("---")
     st.markdown("**💡 Tip:** The AI learns your strengths and weaknesses!")
-
-
-
