@@ -1,29 +1,13 @@
-import pygame
-import json
-import math
+import streamlit as st
 import random
+import math
 from dataclasses import dataclass
 from typing import List, Tuple, Optional
 
-# Initialize Pygame
-pygame.init()
+# Page config
+st.set_page_config(page_title="🐸 Frog & Treasure Island", layout="wide")
 
 # Constants
-SCREEN_WIDTH = 1000
-SCREEN_HEIGHT = 700
-FPS = 60
-
-# Colors
-WATER_BLUE = (52, 152, 219)
-LILY_GREEN = (46, 204, 113)
-LILY_WRONG = (231, 76, 60)
-LILY_CORRECT = (39, 174, 96)
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GOLD = (241, 196, 15)
-SKY_BLUE = (135, 206, 235)
-
-# Game Settings
 MAX_LIVES = 3
 TOTAL_LEVELS = 10
 NUM_OPTIONS = 4
@@ -34,15 +18,7 @@ class Question:
     meaning: str
     distractors: List[str]
     difficulty: int  # 1=easy, 2=medium, 3=hard
-    
-@dataclass
-class GameState:
-    level: int
-    lives: int
-    score: int
-    correct_answers: int
-    total_attempts: int
-    
+
 class PlayerProfiler:
     """Tracks player performance and estimates success probability"""
     def __init__(self):
@@ -69,60 +45,68 @@ class PlayerProfiler:
         return sum(self.recent_performance) / len(self.recent_performance)
 
 class MinimaxAI:
-    """AI Question Master using Minimax with Alpha-Beta Pruning"""
+    """AI Question Master using a two-ply adversarial selection"""
     def __init__(self, questions: List[Question], profiler: PlayerProfiler):
         self.questions = questions
         self.profiler = profiler
-        self.max_depth = 2
+        self.max_depth = 2  # currently using two-ply (AI -> Player)
         
-    def evaluate_state(self, state: GameState, question: Question) -> float:
-        """Heuristic evaluation function"""
-        success_prob = self.profiler.get_success_probability(question.difficulty)
+    def evaluate_state(self, level: int, lives: int) -> float:
+        """
+        Heuristic evaluation function returning a utility for the AI (higher = better for AI).
+        The AI prefers questions that reduce player's chance to progress.
+        """
+        progress_ratio = level / TOTAL_LEVELS
+        lives_factor = lives / MAX_LIVES
         
-        # AI wants to challenge player (minimize player's expected score)
-        difficulty_factor = question.difficulty / 3.0
-        progress_penalty = state.level / TOTAL_LEVELS
-        lives_factor = state.lives / MAX_LIVES
-        
-        # Lower score is better for AI (harder for player)
-        score = -(success_prob * 10) + (difficulty_factor * 5) - (progress_penalty * 3)
-        
-        return score
+        # Utility components:
+        # - Less player progress is better for AI -> contribute positively when progress low
+        # - Fewer lives is better for AI
+        ai_score = (1.0 - progress_ratio) * 20 + ( (MAX_LIVES - lives) * 5 )
+        return ai_score
     
-    def minimax(self, state: GameState, depth: int, alpha: float, beta: float, 
-                maximizing_player: bool, available_questions: List[Question]) -> Tuple[float, Optional[Question]]:
-        """Minimax with Alpha-Beta Pruning"""
-        if depth == 0 or not available_questions:
-            return 0, None
+    def evaluate_question_for_ai(self, level: int, lives: int, question: Question) -> float:
+        """
+        Evaluate the AI utility for a specific question by estimating the player's response.
+        We compute the *worst-case* (for AI) player choice (i.e., the player will choose the option
+        that gives the lowest AI utility). Then AI selects question that maximizes that worst-case.
+        """
+        # estimate probability of player answering correctly for that difficulty
+        success_prob = self.profiler.get_success_probability(question.difficulty)
+        # For each possible choice, simulate outcome (correct or wrong). Player will pick the best choice for them
+        # (i.e., the choice that results in the lowest AI utility). So AI assumes player acts optimally.
+        # We don't need to iterate actual textual options because correctness is binary.
+        # But to keep logic close to reality we'll consider two branches: correct or incorrect.
         
-        if maximizing_player:  # AI's turn (actually minimizing player success)
-            max_eval = float('-inf')
-            best_question = None
-            
-            for question in available_questions:
-                eval_score = self.evaluate_state(state, question)
-                
-                if eval_score > max_eval:
-                    max_eval = eval_score
-                    best_question = question
-                
-                alpha = max(alpha, eval_score)
-                if beta <= alpha:
-                    break  # Alpha-Beta pruning
-            
-            return max_eval, best_question
+        # Branch: player picks correct answer (probability = success_prob)
+        level_if_correct = min(TOTAL_LEVELS, level + 1)
+        lives_if_correct = lives
+        util_if_correct = self.evaluate_state(level_if_correct, lives_if_correct)
         
-    def select_question(self, state: GameState, used_questions: set) -> Question:
-        """Select the best question using Minimax"""
+        # Branch: player picks wrong answer (probability = 1 - success_prob)
+        level_if_wrong = level
+        lives_if_wrong = max(0, lives - 1)
+        util_if_wrong = self.evaluate_state(level_if_wrong, lives_if_wrong)
+        
+        # From AI perspective, the player will choose action that minimizes AI utility.
+        # But in expectation, the player's actual response is probabilistic; for adversarial (worst-case)
+        # assume player picks whatever gives the minimum utility to AI.
+        worst_case_util = min(util_if_correct, util_if_wrong)
+        
+        # To combine both the difficulty and the worst-case util, add a difficulty bonus
+        difficulty_bonus = (question.difficulty - 1) * 3  # higher difficulty slightly increases AI utility
+        return worst_case_util + difficulty_bonus
+    
+    def select_question(self, level: int, lives: int, used_questions: set) -> Question:
+        """Select the best question using two-ply adversarial reasoning"""
         available = [q for q in self.questions if id(q) not in used_questions]
         
         if not available:
             return random.choice(self.questions)
         
-        # Adjust available questions based on player skill
+        # Adjust available questions based on player skill (simple filtering)
         skill = self.profiler.get_overall_skill()
         
-        # Filter questions by appropriate difficulty
         if skill < 0.4:
             preferred = [q for q in available if q.difficulty <= 2]
         elif skill > 0.7:
@@ -133,320 +117,272 @@ class MinimaxAI:
         if not preferred:
             preferred = available
         
-        _, best_question = self.minimax(state, self.max_depth, float('-inf'), 
-                                       float('inf'), True, preferred[:8])
+        # If list is large, sample to limit runtime (Minimax depth is small but keep responsive)
+        candidate_list = preferred[:16]  # take up to 16 candidates to evaluate
         
-        return best_question if best_question else random.choice(preferred)
+        best_q = None
+        best_score = float('-inf')
+        
+        for q in candidate_list:
+            score = self.evaluate_question_for_ai(level, lives, q)
+            # choose question that maximizes AI's worst-case utility
+            if score > best_score:
+                best_score = score
+                best_q = q
+        
+        return best_q if best_q else random.choice(preferred)
 
-class Frog:
-    """Player character"""
-    def __init__(self, x: int, y: int):
-        self.x = x
-        self.y = y
-        self.target_x = x
-        self.target_y = y
-        self.jumping = False
-        self.jump_progress = 0
-        self.size = 40
-        
-    def jump_to(self, x: int, y: int):
-        self.target_x = x
-        self.target_y = y
-        self.jumping = True
-        self.jump_progress = 0
-    
-    def update(self):
-        if self.jumping:
-            self.jump_progress += 0.08
-            if self.jump_progress >= 1:
-                self.x = self.target_x
-                self.y = self.target_y
-                self.jumping = False
-                self.jump_progress = 0
-            else:
-                # Smooth interpolation with arc
-                t = self.jump_progress
-                self.x = self.x + (self.target_x - self.x) * t
-                arc_height = math.sin(t * math.pi) * 80
-                self.y = self.y + (self.target_y - self.y) * t - arc_height
-    
-    def draw(self, screen):
-        # Simple frog representation
-        pygame.draw.circle(screen, (34, 139, 34), (int(self.x), int(self.y)), self.size)
-        # Eyes
-        pygame.draw.circle(screen, WHITE, (int(self.x - 12), int(self.y - 8)), 8)
-        pygame.draw.circle(screen, WHITE, (int(self.x + 12), int(self.y - 8)), 8)
-        pygame.draw.circle(screen, BLACK, (int(self.x - 12), int(self.y - 8)), 4)
-        pygame.draw.circle(screen, BLACK, (int(self.x + 12), int(self.y - 8)), 4)
+def load_questions() -> List[Question]:
+    """Load vocabulary questions"""
+    return [
+        Question("Ephemeral", "Lasting for a very short time", 
+                ["Eternal", "Permanent", "Lasting"], 1),
+        Question("Ubiquitous", "Present everywhere", 
+                ["Rare", "Unique", "Absent"], 2),
+        Question("Serendipity", "Finding good things by chance", 
+                ["Misfortune", "Planning", "Disaster"], 2),
+        Question("Perspicacious", "Having keen insight", 
+                ["Foolish", "Confused", "Ignorant"], 3),
+        Question("Ameliorate", "To make better or improve", 
+                ["Worsen", "Destroy", "Neglect"], 2),
+        Question("Cacophony", "Harsh, discordant mixture of sounds", 
+                ["Harmony", "Silence", "Melody"], 2),
+        Question("Esoteric", "Intended for a small group", 
+                ["Common", "Popular", "Universal"], 3),
+        Question("Loquacious", "Very talkative", 
+                ["Silent", "Brief", "Quiet"], 1),
+        Question("Magnanimous", "Generous and forgiving", 
+                ["Petty", "Selfish", "Cruel"], 2),
+        Question("Perfidious", "Deceitful and untrustworthy", 
+                ["Loyal", "Honest", "Faithful"], 3),
+        Question("Sanguine", "Optimistic and positive", 
+                ["Pessimistic", "Gloomy", "Sad"], 2),
+        Question("Tenacious", "Persistent and determined", 
+                ["Weak", "Giving up", "Lazy"], 1),
+        Question("Verbose", "Using more words than needed", 
+                ["Concise", "Brief", "Short"], 1),
+        Question("Zealous", "Showing great enthusiasm", 
+                ["Apathetic", "Indifferent", "Lazy"], 2),
+        Question("Benevolent", "Kind and generous", 
+                ["Cruel", "Mean", "Hostile"], 1),
+    ]
 
-class LilyPad:
-    """Answer option lily pad"""
-    def __init__(self, x: int, y: int, text: str, is_correct: bool):
-        self.x = x
-        self.y = y
-        self.text = text
-        self.is_correct = is_correct
-        self.radius = 60
-        self.color = LILY_GREEN
-        self.hover = False
-        
-    def contains_point(self, x: int, y: int) -> bool:
-        dist = math.sqrt((x - self.x)**2 + (y - self.y)**2)
-        return dist <= self.radius
-    
-    def draw(self, screen, font):
-        color = self.color
-        if self.hover:
-            color = tuple(min(c + 30, 255) for c in color)
-        
-        pygame.draw.circle(screen, color, (self.x, self.y), self.radius)
-        pygame.draw.circle(screen, (30, 100, 70), (self.x, self.y), self.radius, 3)
-        
-        # Draw text (wrapped if needed)
-        words = self.text.split()
-        lines = []
-        current_line = []
-        for word in words:
-            current_line.append(word)
-            test_text = ' '.join(current_line)
-            if font.size(test_text)[0] > self.radius * 1.6:
-                if len(current_line) > 1:
-                    current_line.pop()
-                    lines.append(' '.join(current_line))
-                    current_line = [word]
-                else:
-                    lines.append(test_text)
-                    current_line = []
-        if current_line:
-            lines.append(' '.join(current_line))
-        
-        y_offset = self.y - (len(lines) * 10)
-        for line in lines:
-            text_surf = font.render(line, True, WHITE)
-            text_rect = text_surf.get_rect(center=(self.x, y_offset))
-            screen.blit(text_surf, text_rect)
-            y_offset += 20
+def initialize_game():
+    """Initialize game state"""
+    st.session_state.level = 1
+    st.session_state.lives = MAX_LIVES
+    st.session_state.score = 0
+    st.session_state.correct_answers = 0
+    st.session_state.total_attempts = 0
+    st.session_state.used_questions = set()
+    st.session_state.game_over = False
+    st.session_state.victory = False
+    st.session_state.feedback = None
+    st.session_state.questions = load_questions()
+    st.session_state.profiler = PlayerProfiler()
+    st.session_state.ai = MinimaxAI(st.session_state.questions, st.session_state.profiler)
+    setup_new_question()
 
-class FrogGame:
-    """Main game class"""
-    def __init__(self):
-        self.screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
-        pygame.display.set_caption("🐸 Frog & Treasure Island")
-        self.clock = pygame.time.Clock()
-        self.font = pygame.font.Font(None, 28)
-        self.title_font = pygame.font.Font(None, 48)
-        
-        # Load questions
-        self.questions = self.load_questions()
-        
-        # Game components
-        self.profiler = PlayerProfiler()
-        self.ai = MinimaxAI(self.questions, self.profiler)
-        self.state = GameState(1, MAX_LIVES, 0, 0, 0)
-        self.used_questions = set()
-        
-        # Game objects
-        self.frog = Frog(SCREEN_WIDTH // 2, SCREEN_HEIGHT - 100)
-        self.lily_pads = []
-        self.current_question = None
-        
-        # Game flow
-        self.waiting_for_answer = False
-        self.feedback_timer = 0
-        self.game_over = False
-        self.victory = False
-        
-        self.setup_level()
+def setup_new_question():
+    """Setup a new question"""
+    question = st.session_state.ai.select_question(
+        st.session_state.level, 
+        st.session_state.lives,
+        st.session_state.used_questions
+    )
+    st.session_state.used_questions.add(id(question))
+    st.session_state.current_question = question
     
-    def load_questions(self) -> List[Question]:
-        """Load or create vocabulary questions"""
-        return [
-            Question("Ephemeral", "Lasting for a very short time", 
-                    ["Eternal", "Permanent", "Lasting"], 1),
-            Question("Ubiquitous", "Present everywhere", 
-                    ["Rare", "Unique", "Absent"], 2),
-            Question("Serendipity", "Finding good things by chance", 
-                    ["Misfortune", "Planning", "Disaster"], 2),
-            Question("Perspicacious", "Having keen insight", 
-                    ["Foolish", "Confused", "Ignorant"], 3),
-            Question("Ameliorate", "To make better or improve", 
-                    ["Worsen", "Destroy", "Neglect"], 2),
-            Question("Cacophony", "Harsh, discordant mixture of sounds", 
-                    ["Harmony", "Silence", "Melody"], 2),
-            Question("Esoteric", "Intended for a small group", 
-                    ["Common", "Popular", "Universal"], 3),
-            Question("Loquacious", "Very talkative", 
-                    ["Silent", "Brief", "Quiet"], 1),
-            Question("Magnanimous", "Generous and forgiving", 
-                    ["Petty", "Selfish", "Cruel"], 2),
-            Question("Perfidious", "Deceitful and untrustworthy", 
-                    ["Loyal", "Honest", "Faithful"], 3),
-            Question("Sanguine", "Optimistic and positive", 
-                    ["Pessimistic", "Gloomy", "Sad"], 2),
-            Question("Tenacious", "Persistent and determined", 
-                    ["Weak", "Giving up", "Lazy"], 1),
-        ]
+    # Create answer options (ensure NUM_OPTIONS if possible)
+    options = [question.meaning] + question.distractors
+    # If fewer distractors than needed, fill with other meanings
+    if len(options) < NUM_OPTIONS:
+        extras = [q.meaning for q in st.session_state.questions if q.meaning not in options]
+        random.shuffle(extras)
+        while len(options) < NUM_OPTIONS and extras:
+            options.append(extras.pop())
+    random.shuffle(options)
+    st.session_state.options = options
+
+def handle_answer(selected_option: str):
+    """Process player's answer"""
+    question = st.session_state.current_question
+    st.session_state.total_attempts += 1
     
-    def setup_level(self):
-        """Setup a new level with question and lily pads"""
-        self.current_question = self.ai.select_question(self.state, self.used_questions)
-        self.used_questions.add(id(self.current_question))
+    if selected_option == question.meaning:
+        # Correct answer
+        st.session_state.correct_answers += 1
+        st.session_state.score += 10 * question.difficulty
+        st.session_state.level += 1
+        st.session_state.feedback = ("correct", f"✅ Correct! '{question.word}' means '{question.meaning}'")
+        st.session_state.profiler.update_performance(question.difficulty, True)
         
-        # Create answer options
-        options = [self.current_question.meaning] + self.current_question.distractors
-        random.shuffle(options)
+        if st.session_state.level > TOTAL_LEVELS:
+            st.session_state.victory = True
+            st.session_state.game_over = True
+    else:
+        # Wrong answer
+        st.session_state.lives -= 1
+        st.session_state.feedback = ("wrong", f"❌ Wrong! '{question.word}' means '{question.meaning}'")
+        st.session_state.profiler.update_performance(question.difficulty, False)
         
-        # Position lily pads
-        self.lily_pads = []
-        y_pos = SCREEN_HEIGHT - 300
-        spacing = SCREEN_WIDTH // (NUM_OPTIONS + 1)
-        
-        for i, option in enumerate(options):
-            x_pos = spacing * (i + 1)
-            is_correct = (option == self.current_question.meaning)
-            lily_pad = LilyPad(x_pos, y_pos, option, is_correct)
-            self.lily_pads.append(lily_pad)
-        
-        self.waiting_for_answer = True
+        if st.session_state.lives <= 0:
+            st.session_state.game_over = True
+
+# Initialize session state
+if 'level' not in st.session_state:
+    initialize_game()
+
+# Custom CSS
+st.markdown("""
+<style>
+    .main {
+        background: linear-gradient(to bottom, #87CEEB 0%, #52A4D9 100%);
+    }
+    .stButton button {
+        width: 100%;
+        height: 100px;
+        font-size: 18px;
+        border-radius: 15px;
+        border: 3px solid #1e7d5e;
+        background-color: #2ecc71;
+        color: white;
+        font-weight: bold;
+        transition: all 0.3s;
+    }
+    .stButton button:hover {
+        background-color: #27ae60;
+        transform: scale(1.05);
+    }
+    .stat-box {
+        background-color: rgba(255, 255, 255, 0.9);
+        padding: 15px;
+        border-radius: 10px;
+        text-align: center;
+        font-size: 20px;
+        font-weight: bold;
+    }
+    .question-box {
+        background-color: rgba(0, 0, 0, 0.7);
+        padding: 30px;
+        border-radius: 15px;
+        text-align: center;
+        margin: 20px 0;
+    }
+    .question-text {
+        color: white;
+        font-size: 32px;
+        font-weight: bold;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Title
+st.markdown("<h1 style='text-align: center; color: white;'>🐸 Frog & Treasure Island 🏝️</h1>", unsafe_allow_html=True)
+st.markdown("<h3 style='text-align: center; color: white;'>AI-Powered Vocabulary Learning Game</h3>", unsafe_allow_html=True)
+
+# Game stats
+col1, col2, col3, col4 = st.columns(4)
+with col1:
+    st.markdown(f"<div class='stat-box'>❤️ Lives: {st.session_state.lives}</div>", unsafe_allow_html=True)
+with col2:
+    st.markdown(f"<div class='stat-box'>🎯 Score: {st.session_state.score}</div>", unsafe_allow_html=True)
+with col3:
+    st.markdown(f"<div class='stat-box'>📊 Level: {st.session_state.level}/{TOTAL_LEVELS}</div>", unsafe_allow_html=True)
+with col4:
+    accuracy = (st.session_state.correct_answers / st.session_state.total_attempts * 100) if st.session_state.total_attempts > 0 else 0
+    st.markdown(f"<div class='stat-box'>✨ Accuracy: {accuracy:.0f}%</div>", unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Game Over / Victory Screen
+if st.session_state.game_over:
+    if st.session_state.victory:
+        st.balloons()
+        st.markdown("<div style='text-align: center; font-size: 48px;'>🎉 VICTORY! 🎉</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; font-size: 24px; color: white;'>You reached the treasure island!</div>", unsafe_allow_html=True)
+    else:
+        st.markdown("<div style='text-align: center; font-size: 48px;'>💀 Game Over 💀</div>", unsafe_allow_html=True)
+        st.markdown(f"<div style='text-align: center; font-size: 24px; color: white;'>The frog didn't make it...</div>", unsafe_allow_html=True)
     
-    def handle_answer(self, lily_pad: LilyPad):
-        """Process player's answer"""
-        self.state.total_attempts += 1
-        
-        if lily_pad.is_correct:
-            self.state.correct_answers += 1
-            self.state.score += 10 * self.current_question.difficulty
-            self.state.level += 1
-            lily_pad.color = LILY_CORRECT
-            self.profiler.update_performance(self.current_question.difficulty, True)
-            
-            # Move frog to lily pad
-            self.frog.jump_to(lily_pad.x, lily_pad.y)
-            
-            if self.state.level > TOTAL_LEVELS:
-                self.victory = True
-                self.game_over = True
+    st.markdown(f"<div style='text-align: center; font-size: 28px; color: gold; margin: 20px;'>Final Score: {st.session_state.score}</div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align: center; font-size: 22px; color: white;'>Accuracy: {accuracy:.1f}%</div>", unsafe_allow_html=True)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🔄 Play Again", key="restart"):
+            initialize_game()
+            st.rerun()
+
+# Active Game
+elif not st.session_state.game_over:
+    # Show feedback if available
+    if st.session_state.feedback:
+        feedback_type, feedback_msg = st.session_state.feedback
+        if feedback_type == "correct":
+            st.success(feedback_msg)
         else:
-            self.state.lives -= 1
-            lily_pad.color = LILY_WRONG
-            self.profiler.update_performance(self.current_question.difficulty, False)
-            
-            # Show correct answer
-            for lp in self.lily_pads:
-                if lp.is_correct:
-                    lp.color = LILY_CORRECT
-            
-            if self.state.lives <= 0:
-                self.game_over = True
+            st.error(feedback_msg)
         
-        self.waiting_for_answer = False
-        self.feedback_timer = 90  # 1.5 seconds at 60 FPS
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("➡️ Next Question", key="next"):
+                st.session_state.feedback = None
+                if not st.session_state.game_over:
+                    setup_new_question()
+                st.rerun()
     
-    def draw(self):
-        """Render the game"""
-        # Sky/water background
-        self.screen.fill(SKY_BLUE)
-        pygame.draw.rect(self.screen, WATER_BLUE, (0, SCREEN_HEIGHT - 400, SCREEN_WIDTH, 400))
+    else:
+        # Display question
+        question = st.session_state.current_question
         
-        # Draw treasure island at top
-        if not self.game_over:
-            island_y = 50
-            pygame.draw.ellipse(self.screen, (139, 69, 19), 
-                              (SCREEN_WIDTH - 200, island_y - 20, 150, 60))
-            treasure_text = self.font.render("🏝️ TREASURE", True, GOLD)
-            self.screen.blit(treasure_text, (SCREEN_WIDTH - 180, island_y))
+        # Progress bar
+        progress = (st.session_state.level - 1) / TOTAL_LEVELS
+        st.progress(progress)
+        st.markdown(f"<div style='text-align: center; color: white; font-size: 18px;'>🐸 {int(progress * 100)}% to the treasure island! 🏝️</div>", unsafe_allow_html=True)
         
-        # Draw lily pads
-        for lily_pad in self.lily_pads:
-            lily_pad.draw(self.screen, self.font)
+        st.markdown("<br>", unsafe_allow_html=True)
         
-        # Draw frog
-        self.frog.draw(self.screen)
+        # Question display
+        st.markdown(f"""
+        <div class='question-box'>
+            <div class='question-text'>What does '<span style='color: #f1c40f;'>{question.word}</span>' mean?</div>
+            <div style='color: #bdc3c7; font-size: 16px; margin-top: 10px;'>Difficulty: {'⭐' * question.difficulty}</div>
+        </div>
+        """, unsafe_allow_html=True)
         
-        # Draw question
-        if self.current_question and not self.game_over:
-            question_text = f"What does '{self.current_question.word}' mean?"
-            text_surf = self.title_font.render(question_text, True, WHITE)
-            text_rect = text_surf.get_rect(center=(SCREEN_WIDTH // 2, 50))
-            pygame.draw.rect(self.screen, (0, 0, 0, 128), 
-                           text_rect.inflate(40, 20))
-            self.screen.blit(text_surf, text_rect)
+        st.markdown("<h4 style='text-align: center; color: white;'>🪷 Jump to the correct lily pad! 🪷</h4>", unsafe_allow_html=True)
         
-        # Draw HUD
-        lives_text = self.font.render(f"Lives: {'❤️' * self.state.lives}", True, WHITE)
-        score_text = self.font.render(f"Score: {self.state.score}", True, WHITE)
-        level_text = self.font.render(f"Level: {self.state.level}/{TOTAL_LEVELS}", True, WHITE)
-        
-        self.screen.blit(lives_text, (20, 20))
-        self.screen.blit(score_text, (20, 50))
-        self.screen.blit(level_text, (20, 80))
-        
-        # Game over screen
-        if self.game_over:
-            overlay = pygame.Surface((SCREEN_WIDTH, SCREEN_HEIGHT))
-            overlay.set_alpha(200)
-            overlay.fill(BLACK)
-            self.screen.blit(overlay, (0, 0))
-            
-            if self.victory:
-                title = self.title_font.render("🎉 VICTORY! 🎉", True, GOLD)
-                msg = self.font.render(f"You reached the treasure! Score: {self.state.score}", True, WHITE)
-            else:
-                title = self.title_font.render("Game Over", True, WHITE)
-                msg = self.font.render(f"Final Score: {self.state.score}", True, WHITE)
-            
-            accuracy = (self.state.correct_answers / self.state.total_attempts * 100) if self.state.total_attempts > 0 else 0
-            stats = self.font.render(f"Accuracy: {accuracy:.1f}%", True, WHITE)
-            restart = self.font.render("Press SPACE to play again", True, GOLD)
-            
-            self.screen.blit(title, title.get_rect(center=(SCREEN_WIDTH // 2, 250)))
-            self.screen.blit(msg, msg.get_rect(center=(SCREEN_WIDTH // 2, 320)))
-            self.screen.blit(stats, stats.get_rect(center=(SCREEN_WIDTH // 2, 360)))
-            self.screen.blit(restart, restart.get_rect(center=(SCREEN_WIDTH // 2, 420)))
-    
-    def run(self):
-        """Main game loop"""
-        running = True
-        
-        while running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                
-                elif event.type == pygame.KEYDOWN:
-                    if event.key == pygame.K_SPACE and self.game_over:
-                        # Restart game
-                        self.__init__()
-                
-                elif event.type == pygame.MOUSEMOTION:
-                    mx, my = event.pos
-                    for lily_pad in self.lily_pads:
-                        lily_pad.hover = lily_pad.contains_point(mx, my)
-                
-                elif event.type == pygame.MOUSEBUTTONDOWN and not self.game_over:
-                    if self.waiting_for_answer and not self.frog.jumping:
-                        mx, my = event.pos
-                        for lily_pad in self.lily_pads:
-                            if lily_pad.contains_point(mx, my):
-                                self.handle_answer(lily_pad)
-                                break
-            
-            # Update
-            self.frog.update()
-            
-            if self.feedback_timer > 0:
-                self.feedback_timer -= 1
-                if self.feedback_timer == 0 and not self.game_over:
-                    self.setup_level()
-            
-            # Draw
-            self.draw()
-            pygame.display.flip()
-            self.clock.tick(FPS)
-        
-        pygame.quit()
+        # Answer options (lily pads)
+        cols = st.columns(2)
+        for idx, option in enumerate(st.session_state.options):
+            with cols[idx % 2]:
+                if st.button(f"🪷 {option}", key=f"option_{idx}"):
+                    handle_answer(option)
+                    st.rerun()
 
-# Run the game
-if __name__ == "__main__":
-    game = FrogGame()
-    game.run()
+# Sidebar with instructions
+with st.sidebar:
+    st.header("📖 How to Play")
+    st.markdown("""
+    **Objective:** Help the frog reach the treasure island by answering vocabulary questions correctly!
+    
+    **Rules:**
+    - Answer 10 questions correctly to win
+    - You have 3 lives
+    - Wrong answer = lose 1 life
+    - The AI adapts difficulty to your skill level
+    
+    **Scoring:**
+    - Easy (⭐): 10 points
+    - Medium (⭐⭐): 20 points
+    - Hard (⭐⭐⭐): 30 points
+    
+    **AI Features:**
+    - Two-ply adversarial reasoning (AI chooses question, assumes player chooses best answer)
+    - Dynamic difficulty adjustment
+    - Player performance profiling
+    """)
+    
+    st.markdown("---")
+    st.markdown("**💡 Tip:** The AI learns your strengths and weaknesses!")
