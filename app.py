@@ -1,593 +1,638 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🐸 Frog & Treasure Island</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-        }
+import streamlit as st
+import random
+import math
+import json
+from dataclasses import dataclass, asdict
+from typing import List, Tuple, Optional
+import time
 
-        body {
-            background: linear-gradient(to bottom, #87CEEB 0%, #4A90E2 50%, #2E5C8A 100%);
-            min-height: 100vh;
-            overflow-x: hidden;
-        }
+# Page config
+st.set_page_config(
+    page_title="🐸 Frog & Treasure Island",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
-        .game-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
+# Constants
+MAX_LIVES = 3
+TOTAL_LEVELS = 10
+NUM_OPTIONS = 4
+DEPTH_LIMIT = 3
 
-        .header {
-            text-align: center;
-            color: white;
-            text-shadow: 3px 3px 6px rgba(0,0,0,0.4);
-            margin-bottom: 20px;
-        }
+@dataclass
+class Question:
+    word: str
+    meaning: str
+    distractors: List[str]
+    difficulty: int  # 1=easy, 2=medium, 3=hard
+    category: str = "General"
 
-        .header h1 {
-            font-size: 48px;
-            margin-bottom: 10px;
-        }
+class PlayerProfiler:
+    """Advanced player performance tracking"""
+    def __init__(self):
+        self.difficulty_stats = {1: [], 2: [], 3: []}
+        self.recent_performance = []
+        self.response_times = []
+        self.category_performance = {}
+        
+    def update_performance(self, difficulty: int, correct: bool, response_time: float, category: str):
+        self.difficulty_stats[difficulty].append(1 if correct else 0)
+        self.recent_performance.append(1 if correct else 0)
+        self.response_times.append(response_time)
+        
+        if category not in self.category_performance:
+            self.category_performance[category] = []
+        self.category_performance[category].append(1 if correct else 0)
+        
+        # Keep only recent data
+        if len(self.recent_performance) > 8:
+            self.recent_performance.pop(0)
+        if len(self.response_times) > 10:
+            self.response_times.pop(0)
+    
+    def get_success_probability(self, difficulty: int) -> float:
+        stats = self.difficulty_stats[difficulty]
+        if not stats:
+            return 0.5
+        # Weighted average (recent performance matters more)
+        weights = [0.5 ** i for i in range(len(stats) - 1, -1, -1)]
+        weighted_sum = sum(s * w for s, w in zip(stats, weights))
+        return weighted_sum / sum(weights)
+    
+    def get_overall_skill(self) -> float:
+        if not self.recent_performance:
+            return 0.5
+        return sum(self.recent_performance) / len(self.recent_performance)
+    
+    def get_avg_response_time(self) -> float:
+        return sum(self.response_times) / len(self.response_times) if self.response_times else 5.0
+    
+    def get_streak(self) -> int:
+        """Get current correct answer streak"""
+        streak = 0
+        for perf in reversed(self.recent_performance):
+            if perf == 1:
+                streak += 1
+            else:
+                break
+        return streak
 
-        .stats {
-            display: flex;
-            justify-content: space-around;
-            gap: 15px;
-            margin-bottom: 30px;
-            flex-wrap: wrap;
-        }
-
-        .stat-card {
-            background: rgba(255, 255, 255, 0.95);
-            padding: 15px 25px;
-            border-radius: 15px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            text-align: center;
-            min-width: 120px;
-        }
-
-        .stat-value {
-            font-size: 28px;
-            font-weight: bold;
-            color: #2c3e50;
-        }
-
-        .stat-label {
-            font-size: 14px;
-            color: #7f8c8d;
-            margin-top: 5px;
-        }
-
-        .island {
-            background: linear-gradient(135deg, #8B4513 0%, #A0522D 100%);
-            padding: 20px 40px;
-            border-radius: 50% 50% 0 0;
-            text-align: center;
-            margin: 0 auto 40px;
-            width: fit-content;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3);
-            position: relative;
-        }
-
-        .island::before {
-            content: '🌴';
-            position: absolute;
-            left: 10px;
-            top: 10px;
-            font-size: 30px;
-        }
-
-        .island::after {
-            content: '🌴';
-            position: absolute;
-            right: 10px;
-            top: 10px;
-            font-size: 30px;
-        }
-
-        .treasure {
-            font-size: 48px;
-            animation: bounce 2s infinite;
-        }
-
-        @keyframes bounce {
-            0%, 100% { transform: translateY(0); }
-            50% { transform: translateY(-10px); }
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 30px;
-            background: rgba(255,255,255,0.3);
-            border-radius: 15px;
-            overflow: hidden;
-            margin-bottom: 30px;
-            box-shadow: inset 0 2px 5px rgba(0,0,0,0.2);
-        }
-
-        .progress-fill {
-            height: 100%;
-            background: linear-gradient(90deg, #2ecc71, #27ae60);
-            transition: width 0.5s ease;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: white;
-            font-weight: bold;
-        }
-
-        .lake {
-            background: linear-gradient(to bottom, rgba(52, 152, 219, 0.6), rgba(41, 128, 185, 0.8));
-            padding: 40px 20px;
-            border-radius: 30px;
-            min-height: 400px;
-            position: relative;
-            box-shadow: inset 0 5px 20px rgba(0,0,0,0.2);
-        }
-
-        .question-card {
-            background: rgba(0, 0, 0, 0.8);
-            padding: 30px;
-            border-radius: 20px;
-            text-align: center;
-            margin-bottom: 40px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.4);
-        }
-
-        .question-word {
-            font-size: 48px;
-            color: #f39c12;
-            font-weight: bold;
-            margin-bottom: 15px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-        }
-
-        .question-prompt {
-            font-size: 20px;
-            color: white;
-            margin-bottom: 10px;
-        }
-
-        .difficulty {
-            color: #e67e22;
-            font-size: 18px;
-        }
-
-        .lily-pads {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 30px;
-            max-width: 900px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .lily-pad {
-            background: radial-gradient(circle, #2ecc71 0%, #27ae60 70%, #1e8449 100%);
-            border: 5px solid #196f3d;
-            border-radius: 50%;
-            width: 200px;
-            height: 200px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 8px 20px rgba(0,0,0,0.3), inset 0 -5px 10px rgba(0,0,0,0.2);
-            position: relative;
-            margin: 0 auto;
-        }
-
-        .lily-pad::before {
-            content: '';
-            position: absolute;
-            width: 60%;
-            height: 60%;
-            background: radial-gradient(circle, rgba(255,255,255,0.2), transparent);
-            border-radius: 50%;
-            top: 10%;
-            left: 20%;
-        }
-
-        .lily-pad:hover {
-            transform: translateY(-10px) scale(1.05);
-            box-shadow: 0 15px 35px rgba(0,0,0,0.4);
-            border-color: #f39c12;
-        }
-
-        .lily-pad-text {
-            color: white;
-            font-size: 18px;
-            font-weight: bold;
-            text-align: center;
-            padding: 20px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
-            z-index: 1;
-        }
-
-        .frog {
-            font-size: 60px;
-            position: absolute;
-            transition: all 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-            z-index: 10;
-            filter: drop-shadow(0 5px 10px rgba(0,0,0,0.4));
-        }
-
-        .feedback {
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            background: white;
-            padding: 40px 60px;
-            border-radius: 20px;
-            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
-            text-align: center;
-            z-index: 1000;
-            animation: popIn 0.3s ease-out;
-        }
-
-        @keyframes popIn {
-            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-            100% { transform: translate(-50%, -50%) scale(1); opacity: 1; }
-        }
-
-        .feedback h2 {
-            font-size: 36px;
-            margin-bottom: 15px;
-        }
-
-        .feedback.correct h2 { color: #27ae60; }
-        .feedback.wrong h2 { color: #e74c3c; }
-
-        .feedback-definition {
-            font-size: 18px;
-            color: #2c3e50;
-            margin: 15px 0;
-            padding: 15px;
-            background: #ecf0f1;
-            border-radius: 10px;
-        }
-
-        .feedback-bonus {
-            font-size: 16px;
-            color: #7f8c8d;
-            margin-top: 10px;
-        }
-
-        .next-btn {
-            background: linear-gradient(135deg, #3498db, #2980b9);
-            color: white;
-            border: none;
-            padding: 15px 40px;
-            border-radius: 25px;
-            font-size: 18px;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 20px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            transition: all 0.3s;
-        }
-
-        .next-btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
-        }
-
-        .game-over {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: rgba(0,0,0,0.9);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            z-index: 2000;
-        }
-
-        .game-over-content {
-            background: white;
-            padding: 50px;
-            border-radius: 30px;
-            text-align: center;
-            max-width: 500px;
-        }
-
-        .game-over-content h1 {
-            font-size: 48px;
-            margin-bottom: 20px;
-        }
-
-        .restart-btn {
-            background: linear-gradient(135deg, #e74c3c, #c0392b);
-            color: white;
-            border: none;
-            padding: 20px 50px;
-            border-radius: 30px;
-            font-size: 20px;
-            font-weight: bold;
-            cursor: pointer;
-            margin-top: 30px;
-            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
-            transition: all 0.3s;
-        }
-
-        .restart-btn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
-        }
-
-        @media (max-width: 768px) {
-            .lily-pads {
-                grid-template-columns: 1fr;
-                gap: 20px;
-            }
-            .lily-pad {
-                width: 180px;
-                height: 180px;
-            }
-            .question-word {
-                font-size: 36px;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="game-container">
-        <div class="header">
-            <h1>🐸 Frog & Treasure Island 🏝️</h1>
-            <p>Jump to the correct meaning!</p>
-        </div>
-
-        <div class="stats">
-            <div class="stat-card">
-                <div class="stat-value" id="lives">❤️❤️❤️</div>
-                <div class="stat-label">Lives</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="score">0</div>
-                <div class="stat-label">Score</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="level">1/10</div>
-                <div class="stat-label">Level</div>
-            </div>
-            <div class="stat-card">
-                <div class="stat-value" id="streak">🔥 0</div>
-                <div class="stat-label">Streak</div>
-            </div>
-        </div>
-
-        <div class="island">
-            <div class="treasure">💎</div>
-        </div>
-
-        <div class="progress-bar">
-            <div class="progress-fill" id="progress" style="width: 0%">
-                <span id="progress-text">Start!</span>
-            </div>
-        </div>
-
-        <div class="lake">
-            <div class="question-card" id="questionCard">
-                <div class="question-word" id="word">Loading...</div>
-                <div class="question-prompt">Choose the correct meaning:</div>
-                <div class="difficulty" id="difficulty"></div>
-            </div>
-
-            <div class="lily-pads" id="lilyPads"></div>
+class MinimaxAI:
+    """Enhanced AI with improved decision making"""
+    def __init__(self, questions: List[Question], profiler: PlayerProfiler):
+        self.questions = questions
+        self.profiler = profiler
+        self.max_depth = DEPTH_LIMIT
+        self.nodes_evaluated = 0
+        self.pruning_count = 0
+        
+    def evaluate_state(self, level: int, lives: int, question: Question, streak: int) -> float:
+        """Enhanced heuristic evaluation"""
+        success_prob = self.profiler.get_success_probability(question.difficulty)
+        
+        # AI strategy: balance challenge and learning
+        difficulty_factor = question.difficulty / 3.0
+        progress_factor = level / TOTAL_LEVELS
+        lives_factor = lives / MAX_LIVES
+        streak_penalty = min(streak * 0.1, 0.5)  # Don't make it too easy during streaks
+        
+        # Adaptive challenge level
+        skill = self.profiler.get_overall_skill()
+        
+        if skill > 0.8:  # High skill - increase challenge
+            challenge_bonus = difficulty_factor * 3
+        elif skill < 0.4:  # Low skill - provide learning opportunity
+            challenge_bonus = -difficulty_factor * 2
+        else:  # Medium skill - balanced approach
+            challenge_bonus = 0
+        
+        # Final evaluation (AI wants to maximize learning while maintaining engagement)
+        score = (
+            -(success_prob * 8) +  # Prefer questions player might struggle with
+            (difficulty_factor * 4) +  # Higher difficulty preference
+            challenge_bonus +
+            streak_penalty -
+            (progress_factor * 2) +  # Slightly easier near end
+            (lives_factor * 1)  # Consider remaining lives
+        )
+        
+        return score
+    
+    def minimax(self, level: int, lives: int, depth: int, alpha: float, beta: float, 
+                maximizing_player: bool, available_questions: List[Question], streak: int) -> Tuple[float, Optional[Question]]:
+        """Minimax with Alpha-Beta Pruning - Enhanced"""
+        self.nodes_evaluated += 1
+        
+        if depth == 0 or not available_questions:
+            return 0, None
+        
+        if maximizing_player:
+            max_eval = float('-inf')
+            best_question = None
             
-            <div class="frog" id="frog" style="bottom: 20px; left: 50%; transform: translateX(-50%);">🐸</div>
-        </div>
-    </div>
-
-    <script>
-        const QUESTIONS = [
-            {word: "Ephemeral", meaning: "Short-lived", distractors: ["Eternal", "Permanent", "Long-lasting"], difficulty: 1},
-            {word: "Ubiquitous", meaning: "Everywhere", distractors: ["Rare", "Unique", "Absent"], difficulty: 2},
-            {word: "Serendipity", meaning: "Lucky discovery", distractors: ["Bad luck", "Planning", "Disaster"], difficulty: 2},
-            {word: "Perspicacious", meaning: "Keen insight", distractors: ["Foolish", "Confused", "Ignorant"], difficulty: 3},
-            {word: "Ameliorate", meaning: "Make better", distractors: ["Worsen", "Destroy", "Ruin"], difficulty: 2},
-            {word: "Cacophony", meaning: "Harsh sounds", distractors: ["Harmony", "Silence", "Melody"], difficulty: 2},
-            {word: "Esoteric", meaning: "Specialized", distractors: ["Common", "Popular", "Universal"], difficulty: 3},
-            {word: "Loquacious", meaning: "Talkative", distractors: ["Silent", "Brief", "Quiet"], difficulty: 1},
-            {word: "Magnanimous", meaning: "Generous", distractors: ["Petty", "Selfish", "Cruel"], difficulty: 2},
-            {word: "Perfidious", meaning: "Untrustworthy", distractors: ["Loyal", "Honest", "Faithful"], difficulty: 3},
-            {word: "Sanguine", meaning: "Optimistic", distractors: ["Pessimistic", "Gloomy", "Sad"], difficulty: 2},
-            {word: "Tenacious", meaning: "Persistent", distractors: ["Weak", "Quitting", "Lazy"], difficulty: 1},
-            {word: "Verbose", meaning: "Wordy", distractors: ["Concise", "Brief", "Short"], difficulty: 1},
-            {word: "Zealous", meaning: "Enthusiastic", distractors: ["Apathetic", "Indifferent", "Lazy"], difficulty: 2},
-            {word: "Benevolent", meaning: "Kind", distractors: ["Cruel", "Mean", "Hostile"], difficulty: 1},
-            {word: "Enigmatic", meaning: "Mysterious", distractors: ["Clear", "Obvious", "Plain"], difficulty: 2},
-            {word: "Resilient", meaning: "Strong recovery", distractors: ["Fragile", "Weak", "Delicate"], difficulty: 2},
-            {word: "Obsequious", meaning: "Overly obedient", distractors: ["Defiant", "Independent", "Proud"], difficulty: 3},
-        ];
-
-        let gameState = {
-            level: 1,
-            lives: 3,
-            score: 0,
-            streak: 0,
-            bestStreak: 0,
-            usedQuestions: new Set(),
-            currentQuestion: null,
-            difficulty_stats: {1: [], 2: [], 3: []},
-            recent_performance: []
-        };
-
-        function getSkillLevel() {
-            if (gameState.recent_performance.length === 0) return 0.5;
-            return gameState.recent_performance.reduce((a, b) => a + b, 0) / gameState.recent_performance.length;
-        }
-
-        function selectQuestion() {
-            const available = QUESTIONS.filter(q => !gameState.usedQuestions.has(q.word));
-            if (available.length === 0) {
-                gameState.usedQuestions.clear();
-                return QUESTIONS[Math.floor(Math.random() * QUESTIONS.length)];
-            }
-
-            const skill = getSkillLevel();
-            let preferred;
+            # Sort questions by initial heuristic for better pruning
+            scored_questions = [
+                (self.evaluate_state(level, lives, q, streak), q) 
+                for q in available_questions
+            ]
+            scored_questions.sort(key=lambda x: x[0], reverse=True)
             
-            if (skill < 0.4) {
-                preferred = available.filter(q => q.difficulty <= 2);
-            } else if (skill > 0.7) {
-                preferred = available.filter(q => q.difficulty >= 2);
-            } else {
-                preferred = available;
-            }
-
-            if (preferred.length === 0) preferred = available;
-            
-            return preferred[Math.floor(Math.random() * preferred.length)];
-        }
-
-        function setupQuestion() {
-            const question = selectQuestion();
-            gameState.currentQuestion = question;
-            gameState.usedQuestions.add(question.word);
-            gameState.startTime = Date.now();
-
-            document.getElementById('word').textContent = question.word;
-            document.getElementById('difficulty').textContent = '⭐'.repeat(question.difficulty);
-
-            const options = [question.meaning, ...question.distractors];
-            shuffle(options);
-
-            const lilyPads = document.getElementById('lilyPads');
-            lilyPads.innerHTML = '';
-
-            options.forEach((option, idx) => {
-                const pad = document.createElement('div');
-                pad.className = 'lily-pad';
-                pad.innerHTML = `<div class="lily-pad-text">${option}</div>`;
-                pad.onclick = () => handleAnswer(option);
-                lilyPads.appendChild(pad);
-            });
-
-            updateUI();
-        }
-
-        function handleAnswer(selected) {
-            const question = gameState.currentQuestion;
-            const isCorrect = selected === question.meaning;
-            const responseTime = (Date.now() - gameState.startTime) / 1000;
-
-            gameState.difficulty_stats[question.difficulty].push(isCorrect ? 1 : 0);
-            gameState.recent_performance.push(isCorrect ? 1 : 0);
-            if (gameState.recent_performance.length > 8) gameState.recent_performance.shift();
-
-            let feedbackHTML = '';
-            
-            if (isCorrect) {
-                gameState.streak++;
-                gameState.bestStreak = Math.max(gameState.bestStreak, gameState.streak);
+            for score, question in scored_questions:
+                if score > max_eval:
+                    max_eval = score
+                    best_question = question
                 
-                const baseScore = question.difficulty * 10;
-                const timeBonus = Math.max(0, Math.floor(baseScore * 0.5 * (1 - Math.min(responseTime / 15, 1))));
-                const streakBonus = Math.min(gameState.streak * 2, 20);
-                const totalScore = baseScore + timeBonus + streakBonus;
-                
-                gameState.score += totalScore;
-                gameState.level++;
-
-                feedbackHTML = `
-                    <div class="feedback correct">
-                        <h2>✅ Correct!</h2>
-                        <div class="feedback-definition">
-                            <strong>${question.word}</strong> = ${question.meaning}
-                        </div>
-                        <div class="feedback-bonus">
-                            +${totalScore} points (Base: ${baseScore} + Speed: ${timeBonus} + Streak: ${streakBonus})
-                        </div>
-                        <button class="next-btn" onclick="nextQuestion()">Continue →</button>
-                    </div>
-                `;
-
-                if (gameState.level > 10) {
-                    showGameOver(true);
-                    return;
-                }
-            } else {
-                gameState.lives--;
-                gameState.streak = 0;
-
-                feedbackHTML = `
-                    <div class="feedback wrong">
-                        <h2>❌ Wrong!</h2>
-                        <div class="feedback-definition">
-                            <strong>${question.word}</strong> = ${question.meaning}
-                        </div>
-                        <div class="feedback-bonus">
-                            You selected: ${selected}
-                        </div>
-                        <button class="next-btn" onclick="nextQuestion()">Continue →</button>
-                    </div>
-                `;
-
-                if (gameState.lives <= 0) {
-                    setTimeout(() => showGameOver(false), 1500);
-                }
-            }
-
-            document.body.insertAdjacentHTML('beforeend', feedbackHTML);
-            updateUI();
-        }
-
-        function nextQuestion() {
-            document.querySelector('.feedback')?.remove();
-            if (gameState.lives > 0 && gameState.level <= 10) {
-                setupQuestion();
-            }
-        }
-
-        function updateUI() {
-            document.getElementById('lives').textContent = '❤️'.repeat(gameState.lives);
-            document.getElementById('score').textContent = gameState.score;
-            document.getElementById('level').textContent = `${gameState.level}/10`;
-            document.getElementById('streak').textContent = `🔥 ${gameState.streak}`;
+                alpha = max(alpha, score)
+                if beta <= alpha:
+                    self.pruning_count += 1
+                    break  # Alpha-Beta pruning
             
-            const progress = ((gameState.level - 1) / 10) * 100;
-            document.getElementById('progress').style.width = progress + '%';
-            document.getElementById('progress-text').textContent = `${Math.round(progress)}% to treasure!`;
-        }
+            return max_eval, best_question
+        
+    def select_question(self, level: int, lives: int, used_questions: set, streak: int) -> Question:
+        """Enhanced question selection"""
+        self.nodes_evaluated = 0
+        self.pruning_count = 0
+        
+        available = [q for q in self.questions if id(q) not in used_questions]
+        
+        if not available:
+            # Reset and reuse questions
+            return random.choice(self.questions)
+        
+        # Filter by appropriate difficulty
+        skill = self.profiler.get_overall_skill()
+        
+        if skill < 0.3:
+            preferred = [q for q in available if q.difficulty == 1]
+        elif skill < 0.5:
+            preferred = [q for q in available if q.difficulty <= 2]
+        elif skill < 0.7:
+            preferred = [q for q in available if q.difficulty >= 2]
+        else:
+            preferred = [q for q in available if q.difficulty >= 2]
+        
+        if not preferred:
+            preferred = available
+        
+        # Use minimax to select best question
+        _, best_question = self.minimax(
+            level, lives, self.max_depth, 
+            float('-inf'), float('inf'), 
+            True, preferred[:10], streak
+        )
+        
+        return best_question if best_question else random.choice(preferred)
 
-        function showGameOver(victory) {
-            const html = `
-                <div class="game-over">
-                    <div class="game-over-content">
-                        <h1>${victory ? '🎉 Victory! 🎉' : '💀 Game Over'}</h1>
-                        <p style="font-size: 24px; margin: 20px 0;">
-                            ${victory ? 'You reached the treasure!' : 'The frog didn\'t make it...'}
-                        </p>
-                        <p style="font-size: 20px;"><strong>Final Score:</strong> ${gameState.score}</p>
-                        <p style="font-size: 18px;"><strong>Best Streak:</strong> ${gameState.bestStreak}</p>
-                        <button class="restart-btn" onclick="location.reload()">🔄 Play Again</button>
-                    </div>
-                </div>
-            `;
-            document.body.insertAdjacentHTML('beforeend', html);
-        }
+def load_questions() -> List[Question]:
+    """Expanded vocabulary questions with categories"""
+    return [
+        # Easy (1)
+        Question("Ephemeral", "Lasting for a very short time", 
+                ["Eternal", "Permanent", "Durable"], 1, "Time"),
+        Question("Loquacious", "Very talkative", 
+                ["Silent", "Brief", "Quiet"], 1, "Communication"),
+        Question("Tenacious", "Persistent and determined", 
+                ["Weak", "Giving up", "Lazy"], 1, "Character"),
+        Question("Verbose", "Using more words than needed", 
+                ["Concise", "Brief", "Short"], 1, "Communication"),
+        Question("Benevolent", "Kind and generous", 
+                ["Cruel", "Mean", "Hostile"], 1, "Character"),
+        Question("Luminous", "Giving off light; bright", 
+                ["Dark", "Dim", "Shadowy"], 1, "Light"),
+        
+        # Medium (2)
+        Question("Ubiquitous", "Present everywhere", 
+                ["Rare", "Unique", "Absent"], 2, "Presence"),
+        Question("Serendipity", "Finding good things by chance", 
+                ["Misfortune", "Planning", "Disaster"], 2, "Fortune"),
+        Question("Ameliorate", "To make better or improve", 
+                ["Worsen", "Destroy", "Neglect"], 2, "Change"),
+        Question("Cacophony", "Harsh, discordant mixture of sounds", 
+                ["Harmony", "Silence", "Melody"], 2, "Sound"),
+        Question("Magnanimous", "Generous and forgiving", 
+                ["Petty", "Selfish", "Cruel"], 2, "Character"),
+        Question("Sanguine", "Optimistic and positive", 
+                ["Pessimistic", "Gloomy", "Sad"], 2, "Emotion"),
+        Question("Zealous", "Showing great enthusiasm", 
+                ["Apathetic", "Indifferent", "Lazy"], 2, "Emotion"),
+        Question("Enigmatic", "Mysterious and puzzling", 
+                ["Clear", "Obvious", "Plain"], 2, "Mystery"),
+        Question("Resilient", "Able to recover quickly", 
+                ["Fragile", "Weak", "Delicate"], 2, "Strength"),
+        
+        # Hard (3)
+        Question("Perspicacious", "Having keen insight and judgment", 
+                ["Foolish", "Confused", "Ignorant"], 3, "Intelligence"),
+        Question("Esoteric", "Intended for a small, specialized group", 
+                ["Common", "Popular", "Universal"], 3, "Knowledge"),
+        Question("Perfidious", "Deceitful and untrustworthy", 
+                ["Loyal", "Honest", "Faithful"], 3, "Character"),
+        Question("Obsequious", "Excessively obedient or attentive", 
+                ["Defiant", "Independent", "Proud"], 3, "Behavior"),
+        Question("Recalcitrant", "Stubbornly resistant to authority", 
+                ["Compliant", "Obedient", "Agreeable"], 3, "Behavior"),
+        Question("Munificent", "Very generous with money or gifts", 
+                ["Stingy", "Greedy", "Miserly"], 3, "Generosity"),
+        Question("Pellucid", "Transparently clear in meaning", 
+                ["Obscure", "Confusing", "Vague"], 3, "Clarity"),
+        Question("Phlegmatic", "Calm and unemotional in temperament", 
+                ["Excitable", "Passionate", "Emotional"], 3, "Emotion"),
+    ]
 
-        function shuffle(array) {
-            for (let i = array.length - 1; i > 0; i--) {
-                const j = Math.floor(Math.random() * (i + 1));
-                [array[i], array[j]] = [array[j], array[i]];
-            }
-        }
+def initialize_game():
+    """Initialize comprehensive game state"""
+    st.session_state.level = 1
+    st.session_state.lives = MAX_LIVES
+    st.session_state.score = 0
+    st.session_state.correct_answers = 0
+    st.session_state.total_attempts = 0
+    st.session_state.used_questions = set()
+    st.session_state.game_over = False
+    st.session_state.victory = False
+    st.session_state.feedback = None
+    st.session_state.questions = load_questions()
+    st.session_state.profiler = PlayerProfiler()
+    st.session_state.ai = MinimaxAI(st.session_state.questions, st.session_state.profiler)
+    st.session_state.question_start_time = None
+    st.session_state.game_history = []
+    st.session_state.streak = 0
+    st.session_state.best_streak = 0
+    st.session_state.ai_stats = {"nodes": 0, "pruning": 0}
+    setup_new_question()
 
-        // Start game
-        setupQuestion();
-    </script>
-</body>
-</html>
+def setup_new_question():
+    """Setup new question with enhanced tracking"""
+    streak = st.session_state.get('streak', 0)
+    question = st.session_state.ai.select_question(
+        st.session_state.level, 
+        st.session_state.lives,
+        st.session_state.used_questions,
+        streak
+    )
+    st.session_state.used_questions.add(id(question))
+    st.session_state.current_question = question
+    st.session_state.question_start_time = time.time()
+    
+    # Track AI performance
+    st.session_state.ai_stats = {
+        "nodes": st.session_state.ai.nodes_evaluated,
+        "pruning": st.session_state.ai.pruning_count
+    }
+    
+    # Create answer options with smart distractor placement
+    options = [question.meaning] + question.distractors
+    random.shuffle(options)
+    st.session_state.options = options
+
+def handle_answer(selected_option: str):
+    """Enhanced answer processing with detailed tracking"""
+    question = st.session_state.current_question
+    st.session_state.total_attempts += 1
+    
+    # Calculate response time
+    response_time = time.time() - st.session_state.question_start_time if st.session_state.question_start_time else 5.0
+    
+    is_correct = (selected_option == question.meaning)
+    
+    if is_correct:
+        st.session_state.correct_answers += 1
+        base_score = 10 * question.difficulty
+        
+        # Bonus for speed (up to 50% bonus)
+        time_bonus = max(0, int(base_score * 0.5 * (1 - min(response_time / 15, 1))))
+        
+        # Streak bonus
+        st.session_state.streak += 1
+        streak_bonus = min(st.session_state.streak * 2, 20)
+        
+        total_score = base_score + time_bonus + streak_bonus
+        st.session_state.score += total_score
+        st.session_state.level += 1
+        
+        st.session_state.best_streak = max(st.session_state.best_streak, st.session_state.streak)
+        
+        st.session_state.feedback = (
+            "correct", 
+            f"✅ Correct! +{total_score} points\n\n"
+            f"'{question.word}' means '{question.meaning}'\n"
+            f"⚡ Speed bonus: +{time_bonus} | 🔥 Streak: {st.session_state.streak}"
+        )
+        
+        if st.session_state.level > TOTAL_LEVELS:
+            st.session_state.victory = True
+            st.session_state.game_over = True
+    else:
+        st.session_state.lives -= 1
+        st.session_state.streak = 0
+        
+        st.session_state.feedback = (
+            "wrong", 
+            f"❌ Incorrect!\n\n"
+            f"'{question.word}' means '{question.meaning}'\n"
+            f"You selected: '{selected_option}'"
+        )
+        
+        if st.session_state.lives <= 0:
+            st.session_state.game_over = True
+    
+    # Update profiler
+    st.session_state.profiler.update_performance(
+        question.difficulty, 
+        is_correct, 
+        response_time,
+        question.category
+    )
+    
+    # Track history
+    st.session_state.game_history.append({
+        "level": st.session_state.level,
+        "word": question.word,
+        "difficulty": question.difficulty,
+        "correct": is_correct,
+        "response_time": response_time
+    })
+
+# Initialize session state
+if 'level' not in st.session_state:
+    initialize_game()
+
+# Enhanced CSS with animations
+st.markdown("""
+<style>
+    @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600;700&display=swap');
+    
+    * {
+        font-family: 'Poppins', sans-serif;
+    }
+    
+    .main {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
+        animation: gradient 15s ease infinite;
+        background-size: 200% 200%;
+    }
+    
+    @keyframes gradient {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+    }
+    
+    .stButton button {
+        width: 100%;
+        height: 110px;
+        font-size: 19px;
+        border-radius: 20px;
+        border: 4px solid #1e7d5e;
+        background: linear-gradient(135deg, #2ecc71 0%, #27ae60 100%);
+        color: white;
+        font-weight: 600;
+        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+    }
+    
+    .stButton button:hover {
+        background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+        transform: translateY(-5px) scale(1.02);
+        box-shadow: 0 8px 25px rgba(0,0,0,0.3);
+    }
+    
+    .stButton button:active {
+        transform: translateY(-2px) scale(0.98);
+    }
+    
+    .stat-box {
+        background: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.85) 100%);
+        padding: 20px;
+        border-radius: 15px;
+        text-align: center;
+        font-size: 22px;
+        font-weight: 700;
+        box-shadow: 0 8px 20px rgba(0,0,0,0.15);
+        transition: transform 0.3s;
+    }
+    
+    .stat-box:hover {
+        transform: translateY(-3px);
+    }
+    
+    .question-box {
+        background: linear-gradient(135deg, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.6) 100%);
+        padding: 40px;
+        border-radius: 20px;
+        text-align: center;
+        margin: 30px 0;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.4);
+        animation: slideIn 0.5s ease-out;
+    }
+    
+    @keyframes slideIn {
+        from {
+            opacity: 0;
+            transform: translateY(-20px);
+        }
+        to {
+            opacity: 1;
+            transform: translateY(0);
+        }
+    }
+    
+    .question-text {
+        color: white;
+        font-size: 36px;
+        font-weight: 700;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    
+    .progress-container {
+        background: rgba(255,255,255,0.2);
+        border-radius: 20px;
+        padding: 10px;
+        margin: 20px 0;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Title with animation
+st.markdown("""
+<h1 style='text-align: center; color: white; font-size: 56px; text-shadow: 3px 3px 6px rgba(0,0,0,0.4); margin-bottom: 10px;'>
+    🐸 Frog & Treasure Island 🏝️
+</h1>
+<h3 style='text-align: center; color: rgba(255,255,255,0.9); font-weight: 400;'>
+    AI-Powered Adaptive Vocabulary Learning
+</h3>
+""", unsafe_allow_html=True)
+
+# Enhanced stats display
+col1, col2, col3, col4, col5 = st.columns(5)
+with col1:
+    st.markdown(f"<div class='stat-box'>❤️<br>{st.session_state.lives} Lives</div>", unsafe_allow_html=True)
+with col2:
+    st.markdown(f"<div class='stat-box'>🎯<br>{st.session_state.score} Pts</div>", unsafe_allow_html=True)
+with col3:
+    st.markdown(f"<div class='stat-box'>📊<br>Lvl {st.session_state.level}/{TOTAL_LEVELS}</div>", unsafe_allow_html=True)
+with col4:
+    streak = st.session_state.get('streak', 0)
+    st.markdown(f"<div class='stat-box'>🔥<br>{streak} Streak</div>", unsafe_allow_html=True)
+with col5:
+    accuracy = (st.session_state.correct_answers / st.session_state.total_attempts * 100) if st.session_state.total_attempts > 0 else 0
+    st.markdown(f"<div class='stat-box'>✨<br>{accuracy:.0f}%</div>", unsafe_allow_html=True)
+
+st.markdown("<br>", unsafe_allow_html=True)
+
+# Game Over / Victory Screen
+if st.session_state.game_over:
+    if st.session_state.victory:
+        st.balloons()
+        st.markdown("""
+        <div style='text-align: center;'>
+            <div style='font-size: 72px; margin: 20px;'>🎉 🏆 🎉</div>
+            <div style='font-size: 48px; color: gold; font-weight: 700;'>VICTORY!</div>
+            <div style='font-size: 24px; color: white; margin: 20px;'>You conquered the treasure island!</div>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        st.markdown("""
+        <div style='text-align: center;'>
+            <div style='font-size: 72px; margin: 20px;'>💀</div>
+            <div style='font-size: 48px; color: #e74c3c; font-weight: 700;'>Game Over</div>
+            <div style='font-size: 24px; color: white; margin: 20px;'>The frog's journey ends here...</div>
+        </div>
+        """, unsafe_allow_html=True)
+    
+    # Final statistics
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Final Score", st.session_state.score, delta=None)
+    with col2:
+        st.metric("Accuracy", f"{accuracy:.1f}%", delta=None)
+    with col3:
+        st.metric("Best Streak", st.session_state.best_streak, delta=None)
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🔄 Play Again", key="restart", use_container_width=True):
+            initialize_game()
+            st.rerun()
+
+# Active Game
+elif not st.session_state.game_over:
+    # Ensure current_question exists
+    if not hasattr(st.session_state, 'current_question') or st.session_state.current_question is None:
+        setup_new_question()
+    
+    if st.session_state.feedback:
+        feedback_type, feedback_msg = st.session_state.feedback
+        if feedback_type == "correct":
+            st.success(feedback_msg)
+        else:
+            st.error(feedback_msg)
+        
+        col1, col2, col3 = st.columns([1, 1, 1])
+        with col2:
+            if st.button("➡️ Next Question", key="next", use_container_width=True):
+                st.session_state.feedback = None
+                if not st.session_state.game_over:
+                    setup_new_question()
+                st.rerun()
+    
+    else:
+        question = st.session_state.current_question
+        
+        # Enhanced progress bar
+        progress = (st.session_state.level - 1) / TOTAL_LEVELS
+        st.markdown("<div class='progress-container'>", unsafe_allow_html=True)
+        st.progress(progress)
+        st.markdown(f"""
+        <div style='text-align: center; color: white; font-size: 20px; font-weight: 600; margin-top: 10px;'>
+            🐸 {int(progress * 100)}% to treasure! 🏝️
+        </div>
+        """, unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+        
+        # Question display
+        difficulty_stars = "⭐" * question.difficulty
+        st.markdown(f"""
+        <div class='question-box'>
+            <div class='question-text'>
+                What does '<span style='color: #f39c12; font-size: 42px;'>{question.word}</span>' mean?
+            </div>
+            <div style='color: #bdc3c7; font-size: 18px; margin-top: 15px;'>
+                {difficulty_stars} | Category: {question.category}
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+        
+        st.markdown("<h3 style='text-align: center; color: white; margin: 30px 0;'>🪷 Choose the correct lily pad! 🪷</h3>", unsafe_allow_html=True)
+        
+        # Answer options in 2x2 grid
+        col1, col2 = st.columns(2)
+        
+        for idx, option in enumerate(st.session_state.options):
+            with col1 if idx % 2 == 0 else col2:
+                if st.button(f"🪷 {option}", key=f"option_{idx}"):
+                    handle_answer(option)
+                    st.rerun()
+
+# Enhanced Sidebar
+with st.sidebar:
+    st.header("📖 How to Play")
+    st.markdown("""
+    **Objective:** Guide the frog to the treasure island by mastering vocabulary!
+    
+    **Game Rules:**
+    - 🎯 Answer 10 questions to win
+    - ❤️ You have 3 lives
+    - ❌ Wrong answer = -1 life
+    - ✅ Correct answer = progress!
+    
+    **Scoring System:**
+    - ⭐ Easy: 10 points
+    - ⭐⭐ Medium: 20 points
+    - ⭐⭐⭐ Hard: 30 points
+    - ⚡ Speed bonus: up to +50%
+    - 🔥 Streak bonus: +2 per streak
+    """)
+    
+    st.markdown("---")
+    st.subheader("🤖 AI Features")
+    st.markdown("""
+    - **Minimax Algorithm** with depth-3 search
+    - **Alpha-Beta Pruning** for optimization
+    - **Dynamic Difficulty** based on performance
+    - **Adaptive Learning** tracks your progress
+    - **Smart Question Selection** maximizes learning
+    """)
+    
+    st.markdown("---")
+    st.subheader("📊 Your Performance")
+    
+    skill = st.session_state.profiler.get_overall_skill()
+    st.metric("Skill Level", f"{skill*100:.0f}%")
+    
+    if st.session_state.total_attempts > 0:
+        st.markdown(f"""
+        - 📈 Total Attempts: {st.session_state.total_attempts}
+        - ✅ Correct: {st.session_state.correct_answers}
+        - 🏆 Best Streak: {st.session_state.best_streak}
+        """)
+        
+        # Difficulty breakdown
+        st.markdown("**Performance by Difficulty:**")
+        for diff in [1, 2, 3]:
+            stats = st.session_state.profiler.difficulty_stats[diff]
+            if stats:
+                success_rate = sum(stats) / len(stats) * 100
+                stars = "⭐" * diff
+                st.progress(success_rate / 100, text=f"{stars} {success_rate:.0f}%")
+    
+    st.markdown("---")
+    st.subheader("🧠 AI Statistics")
+    st.markdown(f"""
+    - 🔍 Nodes evaluated: {st.session_state.ai_stats['nodes']}
+    - ✂️ Branches pruned: {st.session_state.ai_stats['pruning']}
+    - 🎯 Pruning efficiency: {(st.session_state.ai_stats['pruning'] / max(st.session_state.ai_stats['nodes'], 1) * 100):.1f}%
+    """)
+    
+    st.markdown("---")
+    st.markdown("💡 **Tip:** The AI adapts to your strengths and weaknesses in real-time!")
