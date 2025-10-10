@@ -581,36 +581,3 @@ elif not st.session_state.game_over:
         col1, col2 = st.columns(2)
         for idx, option in enumerate(st.session_state.options):
             with col1 if idx % 2 == 0 else col2:
-                if st.button(f"🪷 {option}", key=f"opt_{idx}"):
-                    handle_answer(option)
-                    st.rerun()
-        
-        # Sidebar with stats
-        with st.sidebar:
-            st.markdown("### 📈 Session Stats")
-            st.metric("Words Learned", st.session_state.correct_answers)
-            st.metric("Current Streak", st.session_state.streak)
-            st.metric("Best Streak", st.session_state.best_streak)
-            
-            accuracy = (st.session_state.correct_answers / st.session_state.total_attempts * 100) if st.session_state.total_attempts > 0 else 0
-            st.metric("Accuracy", f"{accuracy:.1f}%")
-            
-            st.markdown("---")
-            st.markdown("### 🎯 Tips")
-            st.markdown("""
-            - Read the pronunciation carefully
-            - Look for word patterns and roots
-            - Examples help with context
-            - Speed bonuses reward quick thinking
-            - Longer streaks = more points!
-            """)
-            
-            st.markdown("---")
-            st.markdown("### 🧠 Word Tips")
-            q = st.session_state.current_question
-            if len(q.word) > 6:
-                st.markdown(f"**Word Length:** {len(q.word)} letters")
-            st.markdown(f"**Starts with:** {q.word[0]}")
-            
-            if st.button("Show Hint (No Points)", use_container_width=True):
-                st.info(f"💡 Hint: {q.example[:50]}...")
