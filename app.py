@@ -236,46 +236,44 @@ if 'level' not in st.session_state:
 # Custom CSS
 st.markdown("""
 <style>
-    .main {
-        background: linear-gradient(to bottom, #87CEEB 0%, #52A4D9 100%);
-    }
-    .stButton button {
-        width: 100%;
-        height: 100px;
-        font-size: 18px;
-        border-radius: 15px;
-        border: 3px solid #1e7d5e;
-        background-color: #2ecc71;
-        color: white;
-        font-weight: bold;
-        transition: all 0.3s;
-    }
-    .stButton button:hover {
-        background-color: #27ae60;
-        transform: scale(1.05);
-    }
-    .stat-box {
-        background-color: rgba(255, 255, 255, 0.9);
-        padding: 15px;
-        border-radius: 10px;
-        text-align: center;
-        font-size: 20px;
-        font-weight: bold;
-    }
-    .question-box {
-        background-color: rgba(0, 0, 0, 0.7);
-        padding: 30px;
-        border-radius: 15px;
-        text-align: center;
-        margin: 20px 0;
-    }
-    .question-text {
-        color: white;
-        font-size: 32px;
-        font-weight: bold;
-    }
+/* --- Feedback Animations --- */
+.correct-feedback {
+    background: linear-gradient(135deg, #a8e063, #56ab2f);
+    color: white;
+    border-radius: 15px;
+    padding: 15px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+    animation: pulseCorrect 0.5s ease;
+}
+.wrong-feedback {
+    background: linear-gradient(135deg, #ff5858, #f09819);
+    color: white;
+    border-radius: 15px;
+    padding: 15px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+    animation: shakeWrong 0.5s ease;
+}
+@keyframes pulseCorrect {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+@keyframes shakeWrong {
+    0% { transform: translateX(0); }
+    25% { transform: translateX(-5px); }
+    50% { transform: translateX(5px); }
+    75% { transform: translateX(-5px); }
+    100% { transform: translateX(0); }
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # Title
 st.markdown("<h1 style='text-align: center; color: white;'>🐸 Frog & Treasure Island 🏝️</h1>", unsafe_allow_html=True)
@@ -318,19 +316,20 @@ if st.session_state.game_over:
 elif not st.session_state.game_over:
     # Show feedback if available
     if st.session_state.feedback:
-        feedback_type, feedback_msg = st.session_state.feedback
-        if feedback_type == "correct":
-            st.success(feedback_msg)
-        else:
-            st.error(feedback_msg)
-        
-        col1, col2, col3 = st.columns([1, 1, 1])
-        with col2:
-            if st.button("➡️ Next Question", key="next"):
-                st.session_state.feedback = None
-                if not st.session_state.game_over:
-                    setup_new_question()
-                st.rerun()
+    feedback_type, feedback_msg = st.session_state.feedback
+    if feedback_type == "correct":
+        st.markdown(f"<div class='correct-feedback'>{feedback_msg}</div>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"<div class='wrong-feedback'>{feedback_msg}</div>", unsafe_allow_html=True)
+
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("➡️ Next Question", key="next"):
+            st.session_state.feedback = None
+            if not st.session_state.game_over:
+                setup_new_question()
+            st.rerun()
+
     
     else:
         # Display question
@@ -386,3 +385,4 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("**💡 Tip:** The AI learns your strengths and weaknesses!")
+
