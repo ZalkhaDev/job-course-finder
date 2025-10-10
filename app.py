@@ -315,7 +315,7 @@ if st.session_state.game_over:
 # Active Game
 elif not st.session_state.game_over:
     # Show feedback if available
-    if st.session_state.feedback:
+if st.session_state.feedback:
     feedback_type, feedback_msg = st.session_state.feedback
     if feedback_type == "correct":
         st.markdown(f"<div class='correct-feedback'>{feedback_msg}</div>", unsafe_allow_html=True)
@@ -385,4 +385,5 @@ with st.sidebar:
     
     st.markdown("---")
     st.markdown("**💡 Tip:** The AI learns your strengths and weaknesses!")
+
 
