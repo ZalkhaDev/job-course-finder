@@ -1,0 +1,113 @@
+# --- Custom CSS with Enhanced Colors and Animations ---
+st.markdown("""
+<style>
+/* Background Gradient */
+.main {
+    background: linear-gradient(180deg, #74ebd5 0%, #ACB6E5 100%);
+    background-size: 400% 400%;
+    animation: gradientMove 10s ease infinite;
+}
+@keyframes gradientMove {
+    0% {background-position: 0% 50%;}
+    50% {background-position: 100% 50%;}
+    100% {background-position: 0% 50%;}
+}
+
+/* Buttons (Lily Pads) */
+.stButton button {
+    width: 100%;
+    height: 80px;
+    font-size: 18px;
+    border-radius: 20px;
+    border: none;
+    color: white;
+    font-weight: bold;
+    transition: all 0.3s ease-in-out;
+    background: linear-gradient(to bottom right, #27ae60, #2ecc71);
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.3);
+}
+.stButton button:hover {
+    background: linear-gradient(to bottom right, #2ecc71, #27ae60);
+    transform: scale(1.05);
+}
+
+/* Stat boxes */
+.stat-box {
+    background: linear-gradient(135deg, #f8f9fa, #e3f2fd);
+    color: #2c3e50;
+    padding: 15px;
+    border-radius: 15px;
+    box-shadow: 0px 2px 6px rgba(0,0,0,0.15);
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+/* Question box */
+.question-box {
+    background: rgba(0, 0, 0, 0.6);
+    padding: 30px;
+    border-radius: 20px;
+    text-align: center;
+    margin: 20px 0;
+    box-shadow: 0px 4px 10px rgba(0,0,0,0.4);
+}
+.question-text {
+    color: #f1c40f;
+    font-size: 34px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+/* Feedback banners */
+.success {
+    background: linear-gradient(135deg, #a8e063, #56ab2f);
+    color: white;
+    border-radius: 15px;
+    padding: 15px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+}
+.error {
+    background: linear-gradient(135deg, #ff5858, #f09819);
+    color: white;
+    border-radius: 15px;
+    padding: 15px;
+    text-align: center;
+    font-size: 20px;
+    font-weight: bold;
+}
+
+/* Progress bar text */
+.progress-text {
+    text-align: center;
+    color: white;
+    font-size: 18px;
+    margin-top: 5px;
+}
+
+/* Title */
+h1 {
+    text-shadow: 2px 2px 10px rgba(0,0,0,0.4);
+}
+
+/* Water wave bottom */
+.wave {
+    position: fixed;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 150px;
+    background: url('https://i.imgur.com/wlxT8yY.png');
+    background-size: cover;
+    opacity: 0.6;
+    animation: waveMove 8s linear infinite;
+}
+@keyframes waveMove {
+    from {background-position-x: 0;}
+    to {background-position-x: 1000px;}
+}
+</style>
+<div class="wave"></div>
+""", unsafe_allow_html=True)
