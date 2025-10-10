@@ -135,7 +135,7 @@ class MinimaxAI:
                 (self.evaluate_state(level, lives, q, streak), q) 
                 for q in available_questions
             ]
-            scored_questions.sort(reverse=True)
+            scored_questions.sort(key=lambda x: x[0], reverse=True)
             
             for score, question in scored_questions:
                 if score > max_eval:
