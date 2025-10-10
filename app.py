@@ -1,9 +1,10 @@
 import streamlit as st
 import random
 import time
-import math
+import json
 from dataclasses import dataclass
 from typing import List
+from datetime import datetime
 
 # Page config
 st.set_page_config(
@@ -13,7 +14,7 @@ st.set_page_config(
     menu_items=None
 )
 
-# Question data with categories
+# Question data with enhanced metadata
 @dataclass
 class Question:
     word: str
@@ -21,43 +22,50 @@ class Question:
     distractors: List[str]
     difficulty: int
     category: str
+    example: str = ""
+    pronunciation: str = ""
 
 QUESTIONS = [
-    # Easy - Basic
-    Question("Happy", "Feeling joy", ["Sad", "Angry", "Tired"], 1, "Emotions"),
-    Question("Quick", "Moving fast", ["Slow", "Lazy", "Sluggish"], 1, "Speed"),
-    Question("Bright", "Full of light", ["Dark", "Dim", "Dull"], 1, "Light"),
-    Question("Small", "Little in size", ["Large", "Huge", "Giant"], 1, "Size"),
-    Question("Loud", "Making much noise", ["Quiet", "Silent", "Soft"], 1, "Sound"),
-    Question("Hot", "High temperature", ["Cold", "Cool", "Chilly"], 1, "Temperature"),
-    Question("Fast", "High speed", ["Slow", "Sluggish", "Dawdling"], 1, "Speed"),
+    # Easy - Level 1
+    Question("Happy", "Feeling joy or pleasure", ["Sad", "Angry", "Tired"], 1, "Emotions", "She felt happy on her birthday.", "HAP-ee"),
+    Question("Quick", "Moving fast or speedy", ["Slow", "Lazy", "Sluggish"], 1, "Speed", "He made a quick decision.", "KWIK"),
+    Question("Bright", "Full of light or shining", ["Dark", "Dim", "Dull"], 1, "Light", "The bright sun warmed the day.", "BRITE"),
+    Question("Small", "Little in size", ["Large", "Huge", "Giant"], 1, "Size", "She has a small puppy.", "SMAWL"),
+    Question("Loud", "Making much noise", ["Quiet", "Silent", "Soft"], 1, "Sound", "The loud music filled the room.", "LOWD"),
+    Question("Hot", "High temperature", ["Cold", "Cool", "Chilly"], 1, "Temperature", "The hot coffee warmed his hands.", "HAHT"),
+    Question("Fast", "High speed movement", ["Slow", "Sluggish", "Dawdling"], 1, "Speed", "The fast runner won the race.", "FAST"),
+    Question("Strong", "Having great power", ["Weak", "Frail", "Feeble"], 1, "Strength", "She has a strong grip.", "STRONG"),
     
-    # Medium - Intermediate
-    Question("Ephemeral", "Short-lived", ["Eternal", "Permanent", "Lasting"], 2, "Time"),
-    Question("Ubiquitous", "Everywhere", ["Rare", "Unique", "Absent"], 2, "Presence"),
-    Question("Serendipity", "Lucky chance", ["Misfortune", "Bad luck", "Disaster"], 2, "Fortune"),
-    Question("Ameliorate", "Improve things", ["Worsen", "Destroy", "Damage"], 2, "Change"),
-    Question("Cacophony", "Harsh sounds", ["Harmony", "Music", "Melody"], 2, "Sound"),
-    Question("Sanguine", "Optimistic", ["Pessimistic", "Gloomy", "Sad"], 2, "Attitude"),
-    Question("Zealous", "Very eager", ["Apathetic", "Lazy", "Indifferent"], 2, "Emotion"),
-    Question("Enigmatic", "Mysterious", ["Clear", "Obvious", "Plain"], 2, "Mystery"),
-    Question("Resilient", "Quick recovery", ["Fragile", "Weak", "Delicate"], 2, "Strength"),
-    Question("Pragmatic", "Practical", ["Idealistic", "Theoretical", "Abstract"], 2, "Nature"),
-    Question("Eloquent", "Fluent speaker", ["Inarticulate", "Stammering", "Mute"], 2, "Speech"),
+    # Medium - Level 2
+    Question("Ephemeral", "Short-lived or temporary", ["Eternal", "Permanent", "Lasting"], 2, "Time", "Butterfly life is ephemeral.", "ef-EM-er-ul"),
+    Question("Ubiquitous", "Present everywhere", ["Rare", "Unique", "Absent"], 2, "Presence", "Smartphones are ubiquitous today.", "yoo-BIK-wi-tus"),
+    Question("Serendipity", "Finding good things by luck", ["Misfortune", "Bad luck", "Disaster"], 2, "Fortune", "Meeting her was pure serendipity.", "ser-un-DIP-i-tee"),
+    Question("Ameliorate", "To improve or make better", ["Worsen", "Destroy", "Damage"], 2, "Change", "Education can ameliorate poverty.", "uh-MEEL-yuh-rayt"),
+    Question("Cacophony", "Harsh mix of sounds", ["Harmony", "Music", "Melody"], 2, "Sound", "The cacophony of car horns.", "kuh-KAH-fuh-nee"),
+    Question("Sanguine", "Optimistic and positive", ["Pessimistic", "Gloomy", "Sad"], 2, "Attitude", "He remained sanguine despite losses.", "SAN-gwin"),
+    Question("Zealous", "Very eager and enthusiastic", ["Apathetic", "Lazy", "Indifferent"], 2, "Emotion", "She was zealous about her work.", "ZEL-us"),
+    Question("Enigmatic", "Mysterious and puzzling", ["Clear", "Obvious", "Plain"], 2, "Mystery", "His smile was enigmatic.", "en-ig-MAT-ik"),
+    Question("Resilient", "Quick to recover strength", ["Fragile", "Weak", "Delicate"], 2, "Strength", "She is resilient despite hardships.", "ri-ZIL-yunt"),
+    Question("Pragmatic", "Dealing with things in practical way", ["Idealistic", "Theoretical", "Abstract"], 2, "Nature", "He took a pragmatic approach.", "prag-MAT-ik"),
+    Question("Eloquent", "Fluent and expressive speaker", ["Inarticulate", "Stammering", "Mute"], 2, "Speech", "Her eloquent speech moved everyone.", "EL-uh-kwunt"),
+    Question("Meticulous", "Very careful and precise", ["Careless", "Sloppy", "Reckless"], 2, "Behavior", "She did meticulous research.", "muh-TIK-yuh-lus"),
+    Question("Ambiguous", "Open to more than one interpretation", ["Clear", "Definite", "Precise"], 2, "Clarity", "His answer was ambiguous.", "am-BIG-yuh-us"),
     
-    # Hard - Advanced
-    Question("Perspicacious", "Keen judgment", ["Foolish", "Naive", "Gullible"], 3, "Intelligence"),
-    Question("Esoteric", "For specialists", ["Common", "Popular", "Universal"], 3, "Knowledge"),
-    Question("Perfidious", "Dishonest", ["Loyal", "Trustworthy", "Faithful"], 3, "Character"),
-    Question("Obsequious", "Overly servile", ["Defiant", "Bold", "Assertive"], 3, "Behavior"),
-    Question("Recalcitrant", "Stubborn", ["Compliant", "Obedient", "Agreeable"], 3, "Attitude"),
-    Question("Munificent", "Extremely generous", ["Stingy", "Miserly", "Selfish"], 3, "Generosity"),
-    Question("Pellucid", "Crystal clear", ["Obscure", "Confusing", "Vague"], 3, "Clarity"),
-    Question("Phlegmatic", "Calm personality", ["Excitable", "Passionate", "Emotional"], 3, "Temperament"),
+    # Hard - Level 3
+    Question("Perspicacious", "Having keen insight and judgment", ["Foolish", "Naive", "Gullible"], 3, "Intelligence", "Her perspicacious observation was brilliant.", "per-spi-KAY-shus"),
+    Question("Esoteric", "For specialists only; mysterious", ["Common", "Popular", "Universal"], 3, "Knowledge", "That's too esoteric for most people.", "es-uh-TER-ik"),
+    Question("Perfidious", "Deceitful and untrustworthy", ["Loyal", "Trustworthy", "Faithful"], 3, "Character", "His perfidious actions betrayed them.", "per-FID-ee-us"),
+    Question("Obsequious", "Excessively obedient to authority", ["Defiant", "Bold", "Assertive"], 3, "Behavior", "The obsequious servant bowed repeatedly.", "ub-SEE-kwee-us"),
+    Question("Recalcitrant", "Stubbornly resisting authority", ["Compliant", "Obedient", "Agreeable"], 3, "Attitude", "The recalcitrant child refused to obey.", "ri-KAL-si-trunt"),
+    Question("Munificent", "Extremely generous or lavish", ["Stingy", "Miserly", "Selfish"], 3, "Generosity", "His munificent donation saved the charity.", "myoo-NIF-uh-sunt"),
+    Question("Pellucid", "Crystal clear in meaning or style", ["Obscure", "Confusing", "Vague"], 3, "Clarity", "Her pellucid explanation was perfect.", "puh-LOO-sid"),
+    Question("Phlegmatic", "Calm, unemotional temperament", ["Excitable", "Passionate", "Emotional"], 3, "Temperament", "He remained phlegmatic during the crisis.", "fleg-MAT-ik"),
+    Question("Erudite", "Scholarly and knowledgeable", ["Ignorant", "Uneducated", "Naive"], 3, "Knowledge", "The erudite professor impressed all.", "ER-uh-dite"),
+    Question("Surreptitious", "Secret and stealthy manner", ["Open", "Obvious", "Public"], 3, "Behavior", "He made surreptitious glances at her.", "sur-uh-TISH-us"),
 ]
 
 def initialize_game():
-    """Initialize game state"""
+    """Initialize comprehensive game state"""
     st.session_state.level = 1
     st.session_state.lives = 3
     st.session_state.score = 0
@@ -69,20 +77,34 @@ def initialize_game():
     st.session_state.game_over = False
     st.session_state.victory = False
     st.session_state.feedback = None
-    st.session_state.start_time = time.time()
     st.session_state.game_history = []
     st.session_state.category_stats = {}
+    st.session_state.difficulty_stats = {1: {'correct': 0, 'total': 0}, 2: {'correct': 0, 'total': 0}, 3: {'correct': 0, 'total': 0}}
+    st.session_state.start_time = time.time()
     setup_question()
 
 def setup_question():
-    """Setup new question"""
+    """Setup new question with smart selection"""
     available = [q for idx, q in enumerate(QUESTIONS) if idx not in st.session_state.used_questions]
     
     if not available:
         st.session_state.used_questions.clear()
         available = QUESTIONS
     
-    question = random.choice(available)
+    # Smart difficulty selection based on performance
+    overall_accuracy = st.session_state.correct_answers / max(st.session_state.total_attempts, 1)
+    
+    if overall_accuracy > 0.8:
+        preferred = [q for q in available if q.difficulty == 3]
+    elif overall_accuracy > 0.6:
+        preferred = [q for q in available if q.difficulty >= 2]
+    else:
+        preferred = [q for q in available if q.difficulty <= 2]
+    
+    if not preferred:
+        preferred = available
+    
+    question = random.choice(preferred)
     idx = QUESTIONS.index(question)
     st.session_state.used_questions.add(idx)
     st.session_state.current_question = question
@@ -94,19 +116,21 @@ def setup_question():
     st.session_state.options = options
 
 def handle_answer(selected):
-    """Process answer with enhanced feedback"""
+    """Process answer with comprehensive feedback"""
     q = st.session_state.current_question
     is_correct = (selected == q.meaning)
     response_time = time.time() - st.session_state.question_start_time
     
     st.session_state.total_attempts += 1
+    st.session_state.difficulty_stats[q.difficulty]['total'] += 1
     
     if is_correct:
         st.session_state.correct_answers += 1
+        st.session_state.difficulty_stats[q.difficulty]['correct'] += 1
         st.session_state.streak += 1
         st.session_state.best_streak = max(st.session_state.best_streak, st.session_state.streak)
         
-        # Enhanced scoring system
+        # Enhanced scoring
         base = q.difficulty * 10
         time_bonus = max(0, int(base * 0.5 * (1 - min(response_time / 15, 1))))
         streak_bonus = min(st.session_state.streak * 3, 30)
@@ -116,44 +140,41 @@ def handle_answer(selected):
         st.session_state.score += total
         st.session_state.level += 1
         
-        # Track category stats
+        # Category stats
         if q.category not in st.session_state.category_stats:
             st.session_state.category_stats[q.category] = {'correct': 0, 'total': 0}
         st.session_state.category_stats[q.category]['correct'] += 1
         st.session_state.category_stats[q.category]['total'] += 1
         
-        # Determine bonus message
-        if st.session_state.streak >= 5:
-            streak_msg = f"🔥 ON FIRE! {st.session_state.streak} in a row!"
+        # Streak message
+        if st.session_state.streak >= 7:
+            streak_msg = f"🔥🔥🔥 LEGENDARY! {st.session_state.streak} in a row!"
+        elif st.session_state.streak >= 5:
+            streak_msg = f"🔥🔥 ON FIRE! {st.session_state.streak} correct!"
         elif st.session_state.streak >= 3:
-            streak_msg = f"🔥 Hot streak! {st.session_state.streak} correct!"
+            streak_msg = f"🔥 Hot streak! {st.session_state.streak} in a row"
         else:
-            streak_msg = f"Keep it up! {st.session_state.streak} in a row"
+            streak_msg = f"Great! Keep going! {st.session_state.streak} in a row"
         
         st.session_state.feedback = {
             'type': 'correct',
             'message': f"✅ Perfect!",
             'definition': f"'{q.word}' = {q.meaning}",
-            'category': f"Category: {q.category}",
-            'bonus': f"+{total} pts | {streak_msg}",
+            'example': f"Example: {q.example}",
+            'category': f"📚 {q.category}",
+            'bonus': f"+{total} points | {streak_msg}",
             'breakdown': f"Base: {base} | Speed: {time_bonus} | Streak: {streak_bonus}"
         }
-        
-        st.session_state.game_history.append({
-            'level': st.session_state.level - 1,
-            'word': q.word,
-            'correct': True,
-            'time': response_time
-        })
         
         if st.session_state.level > 10:
             st.session_state.victory = True
             st.session_state.game_over = True
     else:
         st.session_state.lives -= 1
+        st.session_state.difficulty_stats[q.difficulty]['total'] += 1
         st.session_state.streak = 0
         
-        # Track category stats
+        # Category stats
         if q.category not in st.session_state.category_stats:
             st.session_state.category_stats[q.category] = {'correct': 0, 'total': 0}
         st.session_state.category_stats[q.category]['total'] += 1
@@ -162,17 +183,11 @@ def handle_answer(selected):
             'type': 'wrong',
             'message': f"❌ Oops!",
             'definition': f"'{q.word}' = {q.meaning}",
-            'category': f"Category: {q.category}",
+            'example': f"Example: {q.example}",
+            'category': f"📚 {q.category}",
             'bonus': f"You selected: {selected}",
             'breakdown': ""
         }
-        
-        st.session_state.game_history.append({
-            'level': st.session_state.level,
-            'word': q.word,
-            'correct': False,
-            'time': response_time
-        })
         
         if st.session_state.lives <= 0:
             st.session_state.game_over = True
@@ -181,7 +196,7 @@ def handle_answer(selected):
 if 'level' not in st.session_state:
     initialize_game()
 
-# Custom CSS with animations
+# Custom CSS - Ultra Enhanced
 st.markdown("""
 <style>
     [data-testid="stMainBlockContainer"] {
@@ -269,6 +284,13 @@ st.markdown("""
         letter-spacing: 2px;
     }
     
+    .pronunciation {
+        font-size: 16px;
+        color: #bdc3c7;
+        font-style: italic;
+        margin-bottom: 15px;
+    }
+    
     .question-prompt {
         font-size: 22px;
         color: #ecf0f1;
@@ -281,14 +303,6 @@ st.markdown("""
         color: #f39c12;
         margin: 15px 0;
         letter-spacing: 3px;
-    }
-    
-    .lily-pads-container {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 25px;
-        max-width: 900px;
-        margin: 40px auto;
     }
     
     .stButton button {
@@ -304,7 +318,6 @@ st.markdown("""
         box-shadow: 0 10px 30px rgba(0,0,0,0.3) !important;
         transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1) !important;
         cursor: pointer !important;
-        position: relative !important;
         overflow: hidden !important;
     }
     
@@ -357,6 +370,17 @@ st.markdown("""
         border-radius: 15px;
         margin: 20px 0;
         font-weight: 600;
+    }
+    
+    .feedback-example {
+        font-size: 16px;
+        color: #5d6d7b;
+        padding: 15px;
+        background: #f8f9fa;
+        border-left: 4px solid #3498db;
+        border-radius: 10px;
+        margin: 15px 0;
+        font-style: italic;
     }
     
     .feedback-category {
@@ -430,17 +454,24 @@ st.markdown("""
         text-shadow: 3px 3px 6px rgba(0,0,0,0.3);
     }
     
-    .stats-summary {
+    .stats-grid {
         display: grid;
         grid-template-columns: repeat(3, 1fr);
         gap: 20px;
+        margin: 30px 0;
+    }
+    
+    .difficulty-breakdown {
+        background: rgba(255,255,255,0.1);
+        padding: 25px;
+        border-radius: 15px;
         margin: 30px 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
 # Header
-st.markdown('<div class="header-text"><h1>🐸 Frog & Treasure Island 🏝️</h1><p style="font-size: 20px; margin: 5px;">Jump to the correct meaning!</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="header-text"><h1>🐸 Frog & Treasure Island 🏝️</h1><p style="font-size: 20px; margin: 5px;">Master vocabulary through adventure!</p></div>', unsafe_allow_html=True)
 
 # Stats
 col1, col2, col3, col4 = st.columns(4)
@@ -474,6 +505,7 @@ if st.session_state.game_over:
         st.markdown(f'<div style="text-align: center; color: white; font-size: 28px; margin: 20px;">The frog\'s adventure ends...</div>', unsafe_allow_html=True)
     
     accuracy = (st.session_state.correct_answers / st.session_state.total_attempts * 100) if st.session_state.total_attempts > 0 else 0
+    total_time = time.time() - st.session_state.start_time
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -483,14 +515,24 @@ if st.session_state.game_over:
     with col3:
         st.metric("Best Streak", st.session_state.best_streak, delta=None)
     
+    # Difficulty breakdown
+    st.markdown("### 📊 Performance by Difficulty")
+    diff_cols = st.columns(3)
+    for diff in [1, 2, 3]:
+        with diff_cols[diff - 1]:
+            stats = st.session_state.difficulty_stats[diff]
+            if stats['total'] > 0:
+                acc = (stats['correct'] / stats['total'] * 100)
+                st.metric(f"{'⭐' * diff}", f"{acc:.0f}%", f"{stats['correct']}/{stats['total']}")
+    
     # Category breakdown
     if st.session_state.category_stats:
-        st.markdown("### 📊 Performance by Category")
-        cat_cols = st.columns(len(st.session_state.category_stats))
-        for idx, (category, stats) in enumerate(st.session_state.category_stats.items()):
+        st.markdown("### 📚 Performance by Category")
+        cat_cols = st.columns(min(len(st.session_state.category_stats), 3))
+        for idx, (category, stats) in enumerate(list(st.session_state.category_stats.items())[:3]):
             with cat_cols[idx]:
-                cat_accuracy = (stats['correct'] / stats['total'] * 100) if stats['total'] > 0 else 0
-                st.metric(category, f"{cat_accuracy:.0f}%", f"{stats['correct']}/{stats['total']}")
+                cat_acc = (stats['correct'] / stats['total'] * 100) if stats['total'] > 0 else 0
+                st.metric(category, f"{cat_acc:.0f}%", f"{stats['correct']}/{stats['total']}")
     
     st.markdown("<br><br>", unsafe_allow_html=True)
     if st.button("🔄 Play Again", use_container_width=True):
@@ -507,6 +549,7 @@ elif not st.session_state.game_over:
         <div class="feedback-box {fb_class}">
             <div class="feedback-title">{fb['message']}</div>
             <div class="feedback-definition">{fb['definition']}</div>
+            <div class="feedback-example">"{fb['example']}"</div>
             <div class="feedback-category">{fb['category']}</div>
             <div class="feedback-bonus">{fb['bonus']}</div>
             {f'<div class="feedback-breakdown">{fb["breakdown"]}</div>' if fb['breakdown'] else ''}
@@ -525,6 +568,7 @@ elif not st.session_state.game_over:
         st.markdown(f"""
         <div class="question-box">
             <div class="question-word">{q.word}</div>
+            <div class="pronunciation">/{q.pronunciation}/</div>
             <div class="question-prompt">Choose the correct meaning:</div>
             <div class="difficulty-stars">{"⭐" * q.difficulty}</div>
             <div style="color: #ecf0f1; font-size: 14px;">Category: {q.category}</div>
@@ -537,6 +581,3 @@ elif not st.session_state.game_over:
         col1, col2 = st.columns(2)
         for idx, option in enumerate(st.session_state.options):
             with col1 if idx % 2 == 0 else col2:
-                if st.button(f"🪷 {option}", key=f"opt_{idx}"):
-                    handle_answer(option)
-                    st.rerun()
